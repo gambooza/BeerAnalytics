@@ -1,0 +1,152 @@
+{
+  "videos": [
+    {
+      "start_clock_sec": 0,
+      "total_time_video": 8889.686,
+      "beer_class_id": 2,
+      "imgsz": 640,
+      "cycle_mode": "tap",
+      "video_path": "C:\\Proyectos gambooza\\chatter_videos_dias\\2026-01-08\\Cerveza Chatter Las Tablas_00_20260108120500.mp4",
+      "tail_seconds": 5,
+      "fps": 14.997155130113708,
+      "start_clock_str": "00:00:00",
+      "taps": [
+        {
+          "cycles": [
+            {
+              "start_time_mmss": "03:28",
+              "clip_path": "clips/ChatterTablas/20260108/ChatterTablas_20260108120500_Heineken_evt_001.mp4",
+              "clip_storage_path": "clips/ChatterTablas/20260108/ChatterTablas_20260108120500_Heineken_evt_001.mp4",
+              "end_clock": "00:03:56",
+              "beers_by_type": [
+                {
+                  "label": "pinta",
+                  "class_id": 3,
+                  "avg_roi": 1.2549019607843137
+                }
+              ],
+              "size_ml": 330,
+              "end_time_mmss": "03:56",
+              "beers": 1,
+              "duration_sec": 28.0053114311431,
+              "uid": "Cerveza Chatter Las Tablas_00_20260108120500.mp4_Heineken_208039_S1",
+              "avg_beers_roi": 1.6666666666666665,
+              "max_conf_tap": null,
+              "end_time_sec": 236.04476777677766,
+              "start_clock": "00:03:28",
+              "start_time_sec": 208.03945634563456,
+              "_is_split": true,
+              "_split_index": 1
+            },
+            {
+              "start_time_mmss": "03:28",
+              "clip_path": "clips/ChatterTablas/20260108/ChatterTablas_20260108120500_Heineken_evt_001.mp4",
+              "clip_storage_path": "clips/ChatterTablas/20260108/ChatterTablas_20260108120500_Heineken_evt_001.mp4",
+              "end_clock": "00:03:56",
+              "beers_by_type": [
+                {
+                  "label": "pinta",
+                  "class_id": 3,
+                  "avg_roi": 1.2549019607843137
+                }
+              ],
+              "size_ml": 330,
+              "end_time_mmss": "03:56",
+              "beers": 1,
+              "duration_sec": 28.0053114311431,
+              "uid": "Cerveza Chatter Las Tablas_00_20260108120500.mp4_Heineken_208039_S2",
+              "avg_beers_roi": 1.6666666666666665,
+              "max_conf_tap": null,
+              "end_time_sec": 236.04476777677766,
+              "start_clock": "00:03:28",
+              "start_time_sec": 208.03945634563456,
+              "_is_split": true,
+              "_split_index": 2
+            },
+            {
+              "end_clock": "00:108:04",
+              "beers_by_type": [
+                {
+                  "label": "pinta",
+                  "class_id": 3,
+                  "avg_roi": 0.6
+                },
+                {
+                  "class_id": 2,
+                  "avg_roi": 0.8,
+                  "label": "cana"
+                }
+              ],
+              "end_time_mmss": "108:04",
+              "size_ml": 330,
+              "end_time_sec": 6484.896579132913,
+              "duration_sec": 21.00398357335689,
+              "max_conf_tap": null,
+              "clip_path": "clips/ChatterTablas/20260108/ChatterTablas_20260108120500_Heineken_evt_002.mp4",
+              "start_clock": "00:107:43",
+              "start_time_mmss": "107:43",
+              "clip_storage_path": "clips/ChatterTablas/20260108/ChatterTablas_20260108120500_Heineken_evt_002.mp4",
+              "avg_beers_roi": 1.4,
+              "beers": 1,
+              "uid": "Cerveza Chatter Las Tablas_00_20260108120500.mp4_Heineken_6463892",
+              "start_time_sec": 6463.892595559556
+            },
+            {
+              "end_time_mmss": "114:21",
+              "avg_beers_roi": 1.3134328358208955,
+              "clip_path": "clips/ChatterTablas/20260108/ChatterTablas_20260108120500_Heineken_evt_003.mp4",
+              "beers": 1,
+              "start_time_mmss": "113:50",
+              "size_ml": 330,
+              "uid": "Cerveza Chatter Las Tablas_00_20260108120500.mp4_Heineken_6830628",
+              "duration_sec": 30.672483948394984,
+              "clip_storage_path": "clips/ChatterTablas/20260108/ChatterTablas_20260108120500_Heineken_evt_003.mp4",
+              "max_conf_tap": null,
+              "start_clock": "00:113:50",
+              "start_time_sec": 6830.628816681668,
+              "beers_by_type": [
+                {
+                  "avg_roi": 0.9104477611940298,
+                  "label": "cana",
+                  "class_id": 2
+                }
+              ],
+              "end_time_sec": 6861.3013006300625,
+              "end_clock": "00:114:21"
+            },
+            {
+              "beers_by_type": [
+                {
+                  "avg_roi": 0.5,
+                  "class_id": 3,
+                  "label": "pinta"
+                },
+                {
+                  "class_id": 2,
+                  "avg_roi": 0.5,
+                  "label": "cana"
+                }
+              ],
+              "clip_storage_path": "clips/ChatterTablas/20260108/ChatterTablas_20260108120500_Heineken_evt_004.mp4",
+              "size_ml": 330,
+              "duration_sec": 13.002466021602231,
+              "avg_beers_roi": 1,
+              "uid": "Cerveza Chatter Las Tablas_00_20260108120500.mp4_Heineken_7180695",
+              "clip_path": "clips/ChatterTablas/20260108/ChatterTablas_20260108120500_Heineken_evt_004.mp4",
+              "start_time_mmss": "119:40",
+              "beers": 1,
+              "start_time_sec": 7180.695209570957,
+              "end_time_mmss": "119:53",
+              "start_clock": "00:119:40",
+              "end_time_sec": 7193.697675592559,
+              "max_conf_tap": null,
+              "end_clock": "00:119:53"
+            }
+          ],
+          "name": "Heineken"
+        }
+      ]
+    }
+    
+  ]
+}
