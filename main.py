@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QPushButton, QVBoxLayo
                              QComboBox, QDialogButtonBox, QTableWidget, QTableWidgetItem,
                              QHeaderView, QMessageBox)
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QPixmap, QImage
+from PySide6.QtGui import QPixmap, QImage, QColor
 from ultralytics import YOLO
 from sklearn.metrics import confusion_matrix, cohen_kappa_score
 
@@ -104,54 +104,76 @@ class SettingsModal(QDialog):
         }
 
 # --- 2. MODAL DE RESULTADOS TEMPORALES (PORCENTAJES) ---
+# --- 2. MODAL DE RESULTADOS TEMPORALES (COBERTURA / RECALL) ---
 class ResultsModal(QDialog):
     def __init__(self, truth_bar, detection_bars, total_frames, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Análisis de Coincidencia Temporal")
-        self.setMinimumSize(600, 300)
+        self.setWindowTitle("Análisis de Cobertura (Recall)")
+        self.setMinimumSize(650, 300)
         self.setStyleSheet("background-color: #2b2b2b; color: white;")
         layout = QVBoxLayout(self)
 
         self.table = QTableWidget()
         self.table.setColumnCount(4)
+        # CAMBIO 1: Etiquetas más claras según tu petición
         self.table.setHorizontalHeaderLabels([
-            "Clase", "Detecciones Totales", "Dentro del Ciclo (OK)", "Porcentaje de Acierto"
+            "Clase", "Frames Reales (Truth)", "Frames Detectados (OK)", "Cobertura (Recall)"
         ])
         self.table.horizontalHeader().setStretchLastSection(True)
         layout.addWidget(self.table)
 
         truth_buffer = truth_bar.buffer
+        
+        # CAMBIO 2: Calculamos el total de frames amarillos (Truth) una sola vez
+        # Esto es nuestro "100%"
+        total_truth_frames = sum(1 for x in truth_buffer[:total_frames] if x > 0)
+
         row = 0
         for name, bar in detection_bars.items():
             ai_buffer = bar.buffer
             limit = min(len(truth_buffer), len(ai_buffer), total_frames)
             
-            total_ai = 0
-            valid = 0
+            valid_intersection = 0 # Detecciones que coinciden (TP)
 
+            # Recorremos frame a frame
             for i in range(limit):
-                if ai_buffer[i] > 0: 
-                    total_ai += 1
-                    if truth_buffer[i] > 0:
-                        valid += 1
+                # Si la Verdad dice SI y la IA dice SI -> Coincidencia
+                if truth_buffer[i] > 0 and ai_buffer[i] > 0:
+                    valid_intersection += 1
 
-            pct = (valid / total_ai * 100) if total_ai > 0 else 0.0
+            # CAMBIO 3: El porcentaje se calcula sobre el TOTAL DE VERDAD (Amarillo)
+            if total_truth_frames > 0:
+                pct = (valid_intersection / total_truth_frames * 100)
+            else:
+                pct = 0.0
 
+            # Pintar fila
             self.table.insertRow(row)
             self.table.setItem(row, 0, QTableWidgetItem(name))
-            self.table.setItem(row, 1, QTableWidgetItem(str(total_ai)))
-            self.table.setItem(row, 2, QTableWidgetItem(str(valid)))
             
+            # Columna 1: Total Frames Amarillos (Lo que pediste)
+            self.table.setItem(row, 1, QTableWidgetItem(str(total_truth_frames)))
+            
+            # Columna 2: Frames donde la IA acertó
+            self.table.setItem(row, 2, QTableWidgetItem(str(valid_intersection)))
+            
+            # Columna 3: Porcentaje
             item_pct = QTableWidgetItem(f"{pct:.2f}%")
-            if pct >= 80: item_pct.setForeground(Qt.green)
-            elif pct < 50: item_pct.setForeground(Qt.red)
+            if pct >= 90: item_pct.setForeground(Qt.green)     # Excelente cobertura
+            elif pct < 50: item_pct.setForeground(Qt.red)      # Se pierde la mitad
+            elif pct < 80: item_pct.setForeground(QColor("orange")) 
+            
             self.table.setItem(row, 3, item_pct)
             row += 1
+
+        # Nota informativa al pie
+        lbl_info = QLabel(f"Nota: El porcentaje indica cuántos frames reales fueron detectados.\nTotal Frames Verdad (Global): {total_truth_frames}")
+        lbl_info.setStyleSheet("color: gray; font-size: 11px;")
+        layout.addWidget(lbl_info)
 
         btn_close = QPushButton("Cerrar")
         btn_close.clicked.connect(self.accept)
         layout.addWidget(btn_close)
-
 # --- 3. MODAL DE MÉTRICAS (KAPPA & MATRIZ) ---
 class MetricsModal(QDialog):
     def __init__(self, truth_bar, detection_bars, total_frames, parent=None):
