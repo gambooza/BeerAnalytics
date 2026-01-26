@@ -103,47 +103,50 @@ class SettingsModal(QDialog):
             'class_map': new_map
         }
 
-# --- 2. MODAL DE RESULTADOS TEMPORALES (PORCENTAJES) ---
-# --- 2. MODAL DE RESULTADOS TEMPORALES (COBERTURA / RECALL) ---
+# --- 2. MODAL DE RESULTADOS TEMPORALES (AJUSTADO POR STRIDE) ---
 class ResultsModal(QDialog):
-    def __init__(self, truth_bar, detection_bars, total_frames, parent=None):
+    def __init__(self, truth_bar, detection_bars, total_frames, current_stride, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Análisis de Cobertura (Recall)")
-        self.setMinimumSize(650, 300)
+        self.setWindowTitle(f"Análisis de Cobertura (Ajustado a Stride: {current_stride})")
+        self.setMinimumSize(700, 350)
         self.setStyleSheet("background-color: #2b2b2b; color: white;")
         layout = QVBoxLayout(self)
 
         self.table = QTableWidget()
         self.table.setColumnCount(4)
-        # CAMBIO 1: Etiquetas más claras según tu petición
         self.table.setHorizontalHeaderLabels([
-            "Clase", "Frames Reales (Truth)", "Frames Detectados (OK)", "Cobertura (Recall)"
+            "Clase", "Frames Reales (Muestreados)", "Aciertos (TP)", "Cobertura Real"
         ])
         self.table.horizontalHeader().setStretchLastSection(True)
         layout.addWidget(self.table)
 
         truth_buffer = truth_bar.buffer
         
-        # CAMBIO 2: Calculamos el total de frames amarillos (Truth) una sola vez
-        # Esto es nuestro "100%"
-        total_truth_frames = sum(1 for x in truth_buffer[:total_frames] if x > 0)
+        # 1. Calculamos el TOTAL DE VERDAD pero solo en los índices del STRIDE
+        # Usamos range(0, total, stride) para simular la visión de la IA
+        truth_sampled_indices = [i for i in range(0, total_frames, current_stride) 
+                                 if i < len(truth_buffer) and truth_buffer[i] > 0]
+        
+        total_truth_sampled = len(truth_sampled_indices)
 
         row = 0
         for name, bar in detection_bars.items():
             ai_buffer = bar.buffer
             limit = min(len(truth_buffer), len(ai_buffer), total_frames)
             
-            valid_intersection = 0 # Detecciones que coinciden (TP)
+            valid_intersection = 0 
 
-            # Recorremos frame a frame
-            for i in range(limit):
-                # Si la Verdad dice SI y la IA dice SI -> Coincidencia
-                if truth_buffer[i] > 0 and ai_buffer[i] > 0:
-                    valid_intersection += 1
+            # 2. Recorremos SOLO los frames que la IA procesó (Saltando según el stride)
+            for i in range(0, limit, current_stride):
+                # Si en este frame (que la IA vio) había verdad...
+                if truth_buffer[i] > 0:
+                    # ...y la IA también marcó 1
+                    if ai_buffer[i] > 0:
+                        valid_intersection += 1
 
-            # CAMBIO 3: El porcentaje se calcula sobre el TOTAL DE VERDAD (Amarillo)
-            if total_truth_frames > 0:
-                pct = (valid_intersection / total_truth_frames * 100)
+            # 3. Calculamos porcentaje sobre la muestra reducida
+            if total_truth_sampled > 0:
+                pct = (valid_intersection / total_truth_sampled * 100)
             else:
                 pct = 0.0
 
@@ -151,53 +154,68 @@ class ResultsModal(QDialog):
             self.table.insertRow(row)
             self.table.setItem(row, 0, QTableWidgetItem(name))
             
-            # Columna 1: Total Frames Amarillos (Lo que pediste)
-            self.table.setItem(row, 1, QTableWidgetItem(str(total_truth_frames)))
+            # Columna 1: Total Truth (Ajustado)
+            self.table.setItem(row, 1, QTableWidgetItem(str(total_truth_sampled)))
             
-            # Columna 2: Frames donde la IA acertó
+            # Columna 2: Aciertos
             self.table.setItem(row, 2, QTableWidgetItem(str(valid_intersection)))
             
             # Columna 3: Porcentaje
             item_pct = QTableWidgetItem(f"{pct:.2f}%")
-            if pct >= 90: item_pct.setForeground(Qt.green)     # Excelente cobertura
-            elif pct < 50: item_pct.setForeground(Qt.red)      # Se pierde la mitad
-            elif pct < 80: item_pct.setForeground(QColor("orange")) 
+            if pct >= 90: item_pct.setForeground(Qt.green)
+            elif pct < 50: item_pct.setForeground(Qt.red)
+            else: item_pct.setForeground(QColor("orange"))
             
             self.table.setItem(row, 3, item_pct)
             row += 1
 
-        # Nota informativa al pie
-        lbl_info = QLabel(f"Nota: El porcentaje indica cuántos frames reales fueron detectados.\nTotal Frames Verdad (Global): {total_truth_frames}")
+        # Nota informativa
+        lbl_info = QLabel(f"Nota: Cálculo realizado muestreando 1 de cada {current_stride} frames.\n"
+                          f"Esto ignora los frames que la IA saltó para ser justo con la puntuación.")
         lbl_info.setStyleSheet("color: gray; font-size: 11px;")
         layout.addWidget(lbl_info)
 
         btn_close = QPushButton("Cerrar")
         btn_close.clicked.connect(self.accept)
         layout.addWidget(btn_close)
-# --- 3. MODAL DE MÉTRICAS (KAPPA & MATRIZ) ---
+
+
+
+# --- 3. MODAL DE MÉTRICAS (KAPPA & RECALL) - CORREGIDO CON STRIDE ---
 class MetricsModal(QDialog):
-    def __init__(self, truth_bar, detection_bars, total_frames, parent=None):
+    def __init__(self, truth_bar, detection_bars, total_frames, stride, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Informe de Validación (Kappa & Matriz)")
-        self.setMinimumSize(750, 400)
+        self.setWindowTitle(f"Informe Técnico (Stride: {stride})")
+        self.setMinimumSize(800, 400)
         self.setStyleSheet("background-color: #2b2b2b; color: white;")
         layout = QVBoxLayout(self)
 
         self.table = QTableWidget()
-        self.table.setColumnCount(6)
+        self.table.setColumnCount(7)
         self.table.setHorizontalHeaderLabels([
-            "Clase", "Kappa Cohen", "Precisión", 
-            "TP (Aciertos)", "FP (Inventados)", "FN (Perdidos)"
+            "Clase", "Kappa Cohen", "Recall (Sensibilidad)", 
+            "Precision (Pureza)", "TP", "FP", "FN (Perdidos)"
         ])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         layout.addWidget(self.table)
 
-        y_true = truth_bar.buffer[:total_frames]
+        # --- APLICAMOS EL STRIDE A LOS DATOS ---
+        # Cogemos solo los frames donde la IA realmente ejecutó inferencia
+        # Ejemplo: Si stride=5, cogemos indices 0, 5, 10, 15...
+        
+        # Buffer de verdad filtrado
+        y_true_raw = truth_bar.buffer[:total_frames]
+        y_true = y_true_raw[::stride] 
+
         row = 0
         for name, bar in detection_bars.items():
             if len(bar.buffer) < total_frames: continue
-            y_pred = bar.buffer[:total_frames]
+            
+            # Buffer de IA filtrado igual que la verdad
+            y_pred_raw = bar.buffer[:total_frames]
+            y_pred = y_pred_raw[::stride]
 
+            # A partir de aquí, las matemáticas son iguales, pero los datos son justos
             try:
                 cm = confusion_matrix(y_true, y_pred, labels=[0, 1])
                 tn, fp, fn, tp = cm.ravel()
@@ -205,28 +223,52 @@ class MetricsModal(QDialog):
                 tn, fp, fn, tp = 0, 0, 0, 0
 
             kappa = cohen_kappa_score(y_true, y_pred)
-            acc = (tp + tn) / (tp + tn + fp + fn) if (tp + tn + fp + fn) > 0 else 0
+            
+            total_real_frames = tp + fn
+            recall = (tp / total_real_frames) if total_real_frames > 0 else 0.0
 
+            total_detected_frames = tp + fp
+            precision = (tp / total_detected_frames) if total_detected_frames > 0 else 0.0
+
+            # --- PINTAR TABLA ---
             self.table.insertRow(row)
             self.table.setItem(row, 0, QTableWidgetItem(name))
             
+            # Kappa
             item_kappa = QTableWidgetItem(f"{kappa:.3f}")
             if kappa > 0.8: item_kappa.setForeground(Qt.green)
             elif kappa < 0.4: item_kappa.setForeground(Qt.red)
             self.table.setItem(row, 1, item_kappa)
 
-            self.table.setItem(row, 2, QTableWidgetItem(f"{acc:.1%}"))
-            self.table.setItem(row, 3, QTableWidgetItem(str(tp)))
-            self.table.setItem(row, 4, QTableWidgetItem(str(fp)))
-            self.table.setItem(row, 5, QTableWidgetItem(str(fn)))
+            # Recall
+            item_recall = QTableWidgetItem(f"{recall:.1%}")
+            if recall < 0.5: item_recall.setForeground(Qt.red)
+            self.table.setItem(row, 2, item_recall)
+
+            # Precision
+            item_prec = QTableWidgetItem(f"{precision:.1%}")
+            if precision < 0.5: item_prec.setForeground(QColor("orange"))
+            self.table.setItem(row, 3, item_prec)
+
+            # Contadores (Ya vienen reducidos por el stride naturalmente)
+            self.table.setItem(row, 4, QTableWidgetItem(str(tp)))
+            self.table.setItem(row, 5, QTableWidgetItem(str(fp)))
+            
+            item_fn = QTableWidgetItem(str(fn))
+            if fn > 0: item_fn.setForeground(Qt.red)
+            self.table.setItem(row, 6, item_fn)
+            
             row += 1
+
+        lbl = QLabel(f"Nota: Métricas calculadas sobre una muestra de {len(y_true)} frames (Total Video: {total_frames} / Stride: {stride})")
+        lbl.setStyleSheet("color: gray; font-size: 11px;")
+        layout.addWidget(lbl)
 
         btn_close = QPushButton("Cerrar")
         btn_close.clicked.connect(self.accept)
         layout.addWidget(btn_close)
-
-
-# --- APLICACIÓN PRINCIPAL ---
+        
+        # --- APLICACIÓN PRINCIPAL ---
 class BeerAnalysisApp(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -610,12 +652,32 @@ class BeerAnalysisApp(QMainWindow):
 
     def show_results(self):
         if self.total_frames > 0:
-            modal = ResultsModal(self.bar_truth, self.detection_bars, self.total_frames, self)
+            # Recuperamos el stride actual de la configuración
+            stride = self.ai_config.get('stride', 1)
+            
+            # Lo pasamos al modal
+            modal = ResultsModal(
+                self.bar_truth, 
+                self.detection_bars, 
+                self.total_frames, 
+                stride,  # <--- NUEVO PARAMETRO
+                self
+            )
             modal.exec()
 
     def show_metrics(self):
         if self.total_frames > 0:
-            modal = MetricsModal(self.bar_truth, self.detection_bars, self.total_frames, self)
+            # Recuperamos el stride de la configuración (por defecto 1)
+            current_stride = self.ai_config.get('stride', 1)
+            
+            # Se lo pasamos al modal
+            modal = MetricsModal(
+                self.bar_truth, 
+                self.detection_bars, 
+                self.total_frames, 
+                current_stride, # <--- NUEVO PARÁMETRO
+                self
+            )
             modal.exec()
 
     def update_time_label(self, pos):
