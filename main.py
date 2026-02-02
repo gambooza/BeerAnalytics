@@ -90,6 +90,84 @@ class SettingsModal(QDialog):
             new_map[original_name] = {'alias': alias, 'conf': conf_val, 'active': True}
         return {'stride': self.stride_spin.value(), 'iou': self.iou_spin.value(), 'class_map': new_map}
 
+class ConfusionMatrixModal(QDialog):
+    def __init__(self, y_true, y_pred, class_name, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"Matriz de Confusión: {class_name}")
+        self.setMinimumSize(500, 500)
+        self.setStyleSheet("background-color: #1e1e1e; color: white;")
+        
+        layout = QVBoxLayout(self)
+        
+        # Calcular métricas usando sklearn
+        cm = confusion_matrix(y_true, y_pred, labels=[1, 0]) # 1: Abierto, 0: Cerrado
+        # Extraer valores (notar que labels=[1,0] cambia el orden estándar a TP, FN, FP, TN)
+        tp, fn, fp, tn = cm.ravel()
+        total = tp + tn + fp + fn
+        
+        # Título
+        title = QLabel(f"Análisis de Frames para: {class_name}")
+        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #f1c40f; margin-bottom: 10px;")
+        layout.addWidget(title)
+
+        # Grid de la Matriz
+        grid = QGridLayout()
+        grid.setSpacing(10)
+
+        # Labels de cabecera
+        grid.addWidget(QLabel(""), 0, 0)
+        grid.addWidget(self._header_label("PREDICCIÓN IA\n(Abierto)"), 0, 1)
+        grid.addWidget(self._header_label("PREDICCIÓN IA\n(Cerrado)"), 0, 2)
+
+        # Fila 1: Realidad Abierto
+        grid.addWidget(self._header_label("REALIDAD\n(CSV Abierto)"), 1, 0)
+        grid.addWidget(self._cell_box(f"TP (Acierto)\n{tp}", f"{(tp/total*100):.1f}%", "#2ecc71"), 1, 1)
+        grid.addWidget(self._cell_box(f"FN (Olvido)\n{fn}", f"{(fn/total*100):.1f}%", "#e74c3c"), 1, 2)
+
+        # Fila 2: Realidad Cerrado
+        grid.addWidget(self._header_label("REALIDAD\n(CSV Cerrado)"), 2, 0)
+        grid.addWidget(self._cell_box(f"FP (Fantasma)\n{fp}", f"{(fp/total*100):.1f}%", "#e67e22"), 2, 1)
+        grid.addWidget(self._cell_box(f"TN (Silencio)\n{tn}", f"{(tn/total*100):.1f}%", "#34495e"), 2, 2)
+
+        layout.addLayout(grid)
+
+        # Métricas resumen al pie
+        metrics_text = (
+            f"<b>Precisión:</b> {(tp/(tp+fp)*100 if (tp+fp)>0 else 0):.2f}% (Fiabilidad)<br>"
+            f"<b>Recall:</b> {(tp/(tp+fn)*100 if (tp+fn)>0 else 0):.2f}% (Eficacia)<br>"
+            f"<b>Total Frames Analizados:</b> {total}"
+        )
+        lbl_metrics = QLabel(metrics_text)
+        lbl_metrics.setStyleSheet("background: #2b2b2b; padding: 15px; border-radius: 5px; margin-top: 10px;")
+        layout.addWidget(lbl_metrics)
+
+        btn_close = QPushButton("Cerrar")
+        btn_close.clicked.connect(self.accept)
+        layout.addWidget(btn_close)
+
+    def _header_label(self, text):
+        lbl = QLabel(text)
+        lbl.setAlignment(Qt.AlignCenter)
+        lbl.setStyleSheet("font-weight: bold; color: #95a5a6; font-size: 11px;")
+        return lbl
+
+    def _cell_box(self, top_text, pct_text, color):
+        widget = QWidget()
+        widget.setStyleSheet(f"background-color: {color}; border-radius: 10px; min-height: 100px;")
+        l = QVBoxLayout(widget)
+        
+        t1 = QLabel(top_text)
+        t1.setAlignment(Qt.AlignCenter)
+        t1.setStyleSheet("color: white; font-weight: bold; font-size: 14px; background: transparent;")
+        
+        t2 = QLabel(pct_text)
+        t2.setAlignment(Qt.AlignCenter)
+        t2.setStyleSheet("color: rgba(255,255,255,0.8); font-size: 18px; font-weight: bold; background: transparent;")
+        
+        l.addWidget(t1)
+        l.addWidget(t2)
+        return widget
+    
 # --- 2. MODAL DE RESULTADOS (% ACIERTO) ---
 class ResultsModal(QDialog):
     def __init__(self, truth_bar, detection_bars, total_frames, current_stride, parent=None):
@@ -416,9 +494,11 @@ class BeerAnalysisApp(QMainWindow):
         layout.addLayout(action_layout)
         
         # Fila Resultados
+        # Fila Resultados
         results_layout = QHBoxLayout()
-        self.btn_results = QPushButton("📊 Ver % Aciertos")
-        self.btn_results.setStyleSheet("background-color: #007acc; font-weight: bold;")
+        # Cambiamos el texto del botón para que refleje la nueva función técnica
+        self.btn_results = QPushButton("🎯 Matriz de Confusión") 
+        self.btn_results.setStyleSheet("background-color: #27ae60; font-weight: bold; color: white;")
         self.btn_results.clicked.connect(self.show_results)
 
         self.btn_metrics = QPushButton("📈 Ver Métricas (Kappa)")
@@ -464,6 +544,42 @@ class BeerAnalysisApp(QMainWindow):
         layout.addLayout(self.bars_container)
         self.bar_truth = DetectionBar("#f1c40f", "TRUTH")
         layout.addWidget(self.bar_truth)
+
+    # Pega esto dentro de class BeerAnalysisApp, a la altura de def init_ui o def load_video
+    def show_results(self):
+        if not self.current_video_events or self.total_frames == 0:
+            QMessageBox.warning(self, "Aviso", "No hay datos suficientes para generar la matriz.")
+            return
+
+        # 1. Crear la Verdad (Truth Mask) con Tolerancia de 1.5 seg
+        tolerance_frames = int(1.5 * self.fps) 
+        y_true_extended = [0] * self.total_frames
+        
+        for evt in self.current_video_events:
+            f_start = max(0, evt["f_start"] - tolerance_frames)
+            f_end = min(self.total_frames - 1, evt["f_end"] + tolerance_frames)
+            for i in range(f_start, f_end + 1):
+                y_true_extended[i] = 1
+
+        # 2. Elegir qué clases analizar (Grifos)
+        target_keywords = ["grifo", "tap", "handle", "abierto_1"]
+        valid_bars = [bar for name, bar in self.detection_bars.items() 
+                      if any(k in name.lower() for k in target_keywords)]
+
+        if not valid_bars:
+            QMessageBox.warning(self, "Error", "No hay clases de 'grifo' detectadas (revisa nombres de clases).")
+            return
+
+        # 3. Unificamos las detecciones de la IA
+        y_pred = [0] * self.total_frames
+        for bar in valid_bars:
+            for i, val in enumerate(bar.buffer):
+                if val > 0: y_pred[i] = 1
+
+        # 4. Lanzar el Modal de Matriz
+        # Usamos stride=1 para máxima precisión en el análisis final
+        modal = ConfusionMatrixModal(y_true_extended, y_pred, "Grifos (Unificado)", self)
+        modal.exec()
 
     # --- HELPERS DE FECHA Y MATCHING ---
     def extract_datetime_from_filename(self, filename):
@@ -742,89 +858,155 @@ class BeerAnalysisApp(QMainWindow):
             QMessageBox.warning(self, "Info", "Sin datos de eventos para este video.")
             return
         
-        # --- FILTRO DE "SOLO GRIFOS" ---
-        # Definimos qué palabras debe tener la clase para ser considerada un grifo.
-        # Cualquier clase que NO tenga esto, será invisible para los cálculos.
+        # --- 1. CONFIGURACIÓN DE GRANULARIDAD ---
+        # Tolerancia: 1.5 segundos a cada lado es un estándar razonable
+        tolerance_seconds = 1.5 
+        tolerance_frames = int(tolerance_seconds * self.fps)
+        
         target_keywords = ["grifo", "tap", "handle", "abierto_1"] 
-        
-        valid_ai_bars = []
-        
-        print("\n--- CALCULANDO PRECISIÓN (SOLO GRIFOS) ---")
-        for name, bar in self.detection_bars.items():
-            name_lower = name.lower()
-            
-            # Solo aceptamos si contiene "grifo", "tap" o "handle"
-            is_valid_tap = any(k in name_lower for k in target_keywords)
-            
-            if is_valid_tap:
-                valid_ai_bars.append(bar)
-                print(f"  ✅ Incluida en cálculo: '{name}'")
-            else:
-                # Cervezas, vasos, personas... se ignoran. 
-                # Si detectan cosas fuera de sitio, NO penalizan la precisión.
-                print(f"  ⚪ Ignorada (No afecta métricas): '{name}'")
+        valid_ai_bars = [bar for name, bar in self.detection_bars.items() 
+                        if any(k in name.lower() for k in target_keywords)]
 
         if not valid_ai_bars:
-            QMessageBox.warning(self, "Aviso", "No he encontrado ninguna clase que parezca un grifo.\nAsegúrate de que tus clases contengan 'grifo' o 'tap'.")
+            QMessageBox.warning(self, "Aviso", "No se detectaron clases de tipo 'grifo'.")
+            return
 
-        # --- PARTE 1: EFICACIA (Recall) ---
-        # ¿Cazamos los eventos del CSV usando solo los grifos?
-        detected_events = 0
-        missed_events = 0
-        
+        # --- 2. CONSTRUCCIÓN DE MÁSCARAS ---
         truth_mask = [False] * self.total_frames
-        
+        # Esta es la clave: la máscara donde 'todo vale' (dentro del rango + tolerancia)
+        truth_mask_extended = [False] * self.total_frames
+
         for evt in self.current_video_events:
             f_start = max(0, evt.get("f_start", 0))
             f_end = min(self.total_frames - 1, evt.get("f_end", 0))
             
             if f_end <= f_start: continue
 
-            # Rellenar Timeline Verdad
+            # Llenamos la verdad absoluta
             for i in range(f_start, f_end + 1):
                 truth_mask[i] = True
+                
+            # Llenamos la zona de tolerancia (Granularidad)
+            t_start = max(0, f_start - tolerance_frames)
+            t_end = min(self.total_frames - 1, f_end + tolerance_frames)
+            for i in range(t_start, t_end + 1):
+                truth_mask_extended[i] = True
 
-            # ¿Detectó alguno de los GRIFOS FILTRADOS?
-            any_detection = False
-            for bar in valid_ai_bars:
-                if sum(bar.buffer[f_start:f_end+1]) > 0:
-                    any_detection = True
-                    break
-            
-            if any_detection: detected_events += 1
+        # --- 3. CÁLCULO DE EFICACIA (RECALL) ---
+        detected_events = 0
+        missed_events = 0
+        for evt in self.current_video_events:
+            f_start, f_end = evt["f_start"], evt["f_end"]
+            # Aquí usamos la máscara original para ver si 'cazamos' el evento
+            any_det = any(sum(bar.buffer[max(0,f_start):min(self.total_frames,f_end+1)]) > 0 
+                        for bar in valid_ai_bars)
+            if any_det: detected_events += 1
             else: missed_events += 1
 
-        # --- PARTE 2: PRECISIÓN (Ruido) ---
-        # Aquí es donde el filtro es clave. Si una "Cerveza" se detecta fuera de tiempo,
-        # como no está en 'valid_ai_bars', ai_activity_mask[i] será False y no contará como error.
-        
+        # --- 4. CÁLCULO DE PRECISIÓN (FIABILIDAD CON TOLERANCIA) ---
         ai_true_positive_frames = 0
         ai_false_positive_frames = 0
         
-        ai_activity_mask = [False] * self.total_frames
+        # Unificamos actividad de todos los grifos en una sola línea de tiempo
+        ai_activity = [False] * self.total_frames
         for bar in valid_ai_bars:
             for i, val in enumerate(bar.buffer):
-                if val > 0: ai_activity_mask[i] = True
+                if val > 0: ai_activity[i] = True
         
         for i in range(self.total_frames):
-            if ai_activity_mask[i]: # Si un GRIFO pitó...
-                if truth_mask[i]:
-                    ai_true_positive_frames += 1 # Era verdad (Acierto)
+            if ai_activity[i]: 
+                # Si la IA detecta algo, miramos si está en la zona EXTENDIDA
+                if truth_mask_extended[i]:
+                    ai_true_positive_frames += 1
                 else:
-                    ai_false_positive_frames += 1 # Era mentira (Ruido de Grifo)
+                    ai_false_positive_frames += 1
         
         total_ai_frames = ai_true_positive_frames + ai_false_positive_frames
         precision_pct = (ai_true_positive_frames / total_ai_frames * 100) if total_ai_frames > 0 else 0.0
         noise_seconds = ai_false_positive_frames / self.fps if self.fps > 0 else 0
 
-        modal = SummaryModal(detected_events, missed_events, len(self.current_video_events), precision_pct, noise_seconds, self)
+        modal = SummaryModal(detected_events, missed_events, len(self.current_video_events), 
+                            precision_pct, noise_seconds, self)
         modal.exec()
 
-    def show_results(self):
-        if self.total_frames > 0:
-            stride = self.ai_config.get('stride', 1)
-            modal = ResultsModal(self.bar_truth, self.detection_bars, self.total_frames, stride, self)
-            modal.exec()
+    class ConfusionMatrixModal(QDialog):
+        def __init__(self, y_true, y_pred, class_name, parent=None):
+            super().__init__(parent)
+            self.setWindowTitle(f"Matriz de Confusión: {class_name}")
+            self.setMinimumSize(500, 500)
+            self.setStyleSheet("background-color: #1e1e1e; color: white;")
+            
+            layout = QVBoxLayout(self)
+            
+            # Calcular métricas usando sklearn
+            cm = confusion_matrix(y_true, y_pred, labels=[1, 0]) # 1: Abierto, 0: Cerrado
+            # Extraer valores (notar que labels=[1,0] cambia el orden estándar a TP, FN, FP, TN)
+            tp, fn, fp, tn = cm.ravel()
+            total = tp + tn + fp + fn
+            
+            # Título
+            title = QLabel(f"Análisis de Frames para: {class_name}")
+            title.setStyleSheet("font-size: 18px; font-weight: bold; color: #f1c40f; margin-bottom: 10px;")
+            layout.addWidget(title)
+
+            # Grid de la Matriz
+            grid = QGridLayout()
+            grid.setSpacing(10)
+
+            # Labels de cabecera
+            grid.addWidget(QLabel(""), 0, 0)
+            grid.addWidget(self._header_label("PREDICCIÓN IA\n(Abierto)"), 0, 1)
+            grid.addWidget(self._header_label("PREDICCIÓN IA\n(Cerrado)"), 0, 2)
+
+            # Fila 1: Realidad Abierto
+            grid.addWidget(self._header_label("REALIDAD\n(CSV Abierto)"), 1, 0)
+            grid.addWidget(self._cell_box(f"TP (Acierto)\n{tp}", f"{(tp/total*100):.1f}%", "#2ecc71"), 1, 1)
+            grid.addWidget(self._cell_box(f"FN (Olvido)\n{fn}", f"{(fn/total*100):.1f}%", "#e74c3c"), 1, 2)
+
+            # Fila 2: Realidad Cerrado
+            grid.addWidget(self._header_label("REALIDAD\n(CSV Cerrado)"), 2, 0)
+            grid.addWidget(self._cell_box(f"FP (Fantasma)\n{fp}", f"{(fp/total*100):.1f}%", "#e67e22"), 2, 1)
+            grid.addWidget(self._cell_box(f"TN (Silencio)\n{tn}", f"{(tn/total*100):.1f}%", "#34495e"), 2, 2)
+
+            layout.addLayout(grid)
+
+            # Métricas resumen al pie
+            metrics_text = (
+                f"<b>Precisión:</b> {(tp/(tp+fp)*100 if (tp+fp)>0 else 0):.2f}% (Fiabilidad)<br>"
+                f"<b>Recall:</b> {(tp/(tp+fn)*100 if (tp+fn)>0 else 0):.2f}% (Eficacia)<br>"
+                f"<b>Total Frames Analizados:</b> {total}"
+            )
+            lbl_metrics = QLabel(metrics_text)
+            lbl_metrics.setStyleSheet("background: #2b2b2b; padding: 15px; border-radius: 5px; margin-top: 10px;")
+            layout.addWidget(lbl_metrics)
+
+            btn_close = QPushButton("Cerrar")
+            btn_close.clicked.connect(self.accept)
+            layout.addWidget(btn_close)
+
+        def _header_label(self, text):
+            lbl = QLabel(text)
+            lbl.setAlignment(Qt.AlignCenter)
+            lbl.setStyleSheet("font-weight: bold; color: #95a5a6; font-size: 11px;")
+            return lbl
+
+        def _cell_box(self, top_text, pct_text, color):
+            widget = QWidget()
+            widget.setStyleSheet(f"background-color: {color}; border-radius: 10px; min-height: 100px;")
+            l = QVBoxLayout(widget)
+            
+            t1 = QLabel(top_text)
+            t1.setAlignment(Qt.AlignCenter)
+            t1.setStyleSheet("color: white; font-weight: bold; font-size: 14px; background: transparent;")
+            
+            t2 = QLabel(pct_text)
+            t2.setAlignment(Qt.AlignCenter)
+            t2.setStyleSheet("color: rgba(255,255,255,0.8); font-size: 18px; font-weight: bold; background: transparent;")
+            
+            l.addWidget(t1)
+            l.addWidget(t2)
+            return widget
+
 
     def show_metrics(self):
         if self.total_frames > 0:
