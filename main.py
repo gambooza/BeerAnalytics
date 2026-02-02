@@ -1,12 +1,15 @@
 import sys
 import os
+import csv
 import json
+import re
+from datetime import datetime, timedelta
 import cv2
 from PySide6.QtWidgets import (QApplication, QMainWindow, QPushButton, QVBoxLayout, 
                              QHBoxLayout, QWidget, QFileDialog, QLabel, QSlider,
                              QDialog, QFormLayout, QDoubleSpinBox, QSpinBox, 
                              QComboBox, QDialogButtonBox, QTableWidget, QTableWidgetItem,
-                             QHeaderView, QMessageBox)
+                             QHeaderView, QMessageBox, QGridLayout)
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QPixmap, QImage, QColor
 from ultralytics import YOLO
@@ -192,11 +195,11 @@ class MetricsModal(QDialog):
         btn_close.clicked.connect(self.accept)
         layout.addWidget(btn_close)
 
-# --- 4. MODAL DE LOG DE EVENTOS (NUEVA LÓGICA SOLICITADA) ---
+# --- 4. MODAL DE LOG DE EVENTOS ---
 class EventsLogModal(QDialog):
-    def __init__(self, video_filename, json_data_full, detection_bars, fps, total_frames, parent=None):
+    def __init__(self, video_filename, detection_bars, fps, total_frames, current_events_in_range, parent=None):
         super().__init__(parent)
-        self.setWindowTitle(f"Desglose de Frames por Evento: {video_filename}")
+        self.setWindowTitle(f"Desglose de Frames por Evento (Rango detectado)")
         self.setMinimumSize(1100, 600)
         self.setStyleSheet("background-color: #2b2b2b; color: white;")
         layout = QVBoxLayout(self)
@@ -204,91 +207,62 @@ class EventsLogModal(QDialog):
         self.table = QTableWidget()
         self.table.setColumnCount(6)
         self.table.setHorizontalHeaderLabels([
-            "ID Evento", "Clase JSON", "Inicio", "Duración (Frames)", 
+            "ID Evento", "Clase Truth (CSV)", "Inicio Relativo", "Duración (Frames)", 
             "DETECCIONES POR CLASE (Frames Captados)", "Estado"
         ])
         
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(4, QHeaderView.Stretch) # Columna de detecciones ancha
+        header.setSectionResizeMode(4, QHeaderView.Stretch) 
         layout.addWidget(self.table)
 
-        video_data = json_data_full.get(video_filename)
-        if not video_data:
-            layout.addWidget(QLabel(f"❌ Error: No hay datos en JSON para: {video_filename}"))
-            return
-
         row = 0
-        v_fps = video_data.get("fps", fps)
-        
-        # Iterar sobre los eventos del JSON (Ground Truth)
-        for tap in video_data.get("taps", []):
-            json_class_name = str(tap.get("tap_id", "Desconocido"))
+        for i, evt in enumerate(current_events_in_range):
+            self.table.insertRow(row)
+            json_class_name = evt["tap_id"]
+            f_start = evt["f_start"]
+            f_end = evt["f_end"]
             
-            for i, cycle in enumerate(tap.get("cycles", [])):
-                self.table.insertRow(row)
-                
-                # --- CALCULAR INTERVALO DE TIEMPO (FRAMES) ---
-                start_sec = cycle.get("start_time_sec", 0)
-                end_sec = cycle.get("end_time_sec", 0)
-                
-                f_start = int(start_sec * v_fps)
-                f_end = int(end_sec * v_fps)
-                f_start = max(0, f_start)
-                f_end = min(total_frames - 1, f_end)
-                
-                duration_frames = f_end - f_start
-                if duration_frames <= 0: continue
+            f_start = max(0, f_start)
+            f_end = min(total_frames - 1, f_end)
+            duration_frames = f_end - f_start
+            
+            if duration_frames <= 0: continue
 
-                # --- LÓGICA DE RECUENTO: MIRAR TODAS LAS CLASES ---
-                # "veamos el n de frames captados por la ia... en todas las clases"
-                detections_summary = []
-                total_detected_frames_any_class = 0
+            detections_summary = []
+            for ai_name, ai_bar in detection_bars.items():
+                fragment = ai_bar.buffer[f_start:f_end+1]
+                frames_count = sum(1 for x in fragment if x > 0)
+                if frames_count > 0:
+                    detections_summary.append(f"{ai_name}: {frames_count}")
 
-                # Recorremos todas las barras de la IA disponibles
-                for ai_name, ai_bar in detection_bars.items():
-                    # Extraemos el fragmento de memoria correspondiente a este evento
-                    fragment = ai_bar.buffer[f_start:f_end+1]
-                    
-                    # Contamos cuántos frames (1s) hay en este fragmento
-                    frames_count = sum(1 for x in fragment if x > 0)
-                    
-                    if frames_count > 0:
-                        # Formato: "Clase: N frames"
-                        detections_summary.append(f"{ai_name}: {frames_count}")
-                        total_detected_frames_any_class += frames_count
+            if detections_summary:
+                summary_str = " | ".join(detections_summary)
+                status = "✅ CON DATOS"
+                color = Qt.green
+            else:
+                summary_str = "--- (Silencio Total) ---"
+                status = "❌ VACÍO"
+                color = Qt.red
 
-                # Construimos el string para la celda
-                if detections_summary:
-                    summary_str = " | ".join(detections_summary)
-                    status = "✅ CON DATOS"
-                    color = Qt.green
-                else:
-                    summary_str = "--- (Silencio Total) ---"
-                    status = "❌ VACÍO"
-                    color = Qt.red
+            self.table.setItem(row, 0, QTableWidgetItem(f"#{i+1}"))
+            self.table.setItem(row, 1, QTableWidgetItem(json_class_name))
+            
+            rel_sec = f_start / fps if fps > 0 else 0
+            self.table.setItem(row, 2, QTableWidgetItem(self.format_seconds(rel_sec)))
+            self.table.setItem(row, 3, QTableWidgetItem(f"{duration_frames} f"))
+            
+            item_summary = QTableWidgetItem(summary_str)
+            item_summary.setToolTip(summary_str)
+            self.table.setItem(row, 4, item_summary)
+            
+            item_status = QTableWidgetItem(status)
+            item_status.setForeground(color)
+            item_status.setFont(self.get_bold_font())
+            self.table.setItem(row, 5, item_status)
+            row += 1
 
-                # --- PINTAR LA FILA ---
-                self.table.setItem(row, 0, QTableWidgetItem(f"#{i+1}"))
-                self.table.setItem(row, 1, QTableWidgetItem(json_class_name))
-                self.table.setItem(row, 2, QTableWidgetItem(self.format_seconds(start_sec)))
-                
-                # Duración en frames (para tener contexto del número de detecciones)
-                self.table.setItem(row, 3, QTableWidgetItem(f"{duration_frames} f"))
-                
-                # LA COLUMNA IMPORTANTE: Desglose
-                item_summary = QTableWidgetItem(summary_str)
-                item_summary.setToolTip(summary_str)
-                self.table.setItem(row, 4, item_summary)
-                
-                item_status = QTableWidgetItem(status)
-                item_status.setForeground(color)
-                item_status.setFont(self.get_bold_font())
-                self.table.setItem(row, 5, item_status)
-
-                row += 1
-
-        layout.addWidget(QLabel(f"Total Eventos JSON: {row}. La columna central muestra cuántos frames detectó cada clase de la IA en ese periodo."))
+        layout.addWidget(QLabel(f"Total Eventos en rango: {row}."))
         btn_close = QPushButton("Cerrar")
         btn_close.clicked.connect(self.accept)
         layout.addWidget(btn_close)
@@ -297,11 +271,86 @@ class EventsLogModal(QDialog):
         m = int(seconds // 60)
         s = int(seconds % 60)
         return f"{m:02d}:{s:02d}"
-
+    
     def get_bold_font(self):
         f = self.font()
         f.setBold(True)
         return f
+
+# --- 5. MODAL DE RESUMEN EJECUTIVO ---
+# --- 5. MODAL DE RESUMEN EJECUTIVO (COMPLETO) ---
+class SummaryModal(QDialog):
+    def __init__(self, detected, missed, total_events, precision_pct, noise_seconds, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Resumen Global de Calidad")
+        self.setMinimumSize(600, 400)
+        self.setStyleSheet("background-color: #2b2b2b; color: white;")
+        layout = QVBoxLayout(self)
+
+        # --- SECCIÓN 1: EFICACIA (RECALL) ---
+        lbl_eff = QLabel("1. EFICACIA (¿No se pierde nada?)")
+        lbl_eff.setStyleSheet("font-size: 16px; font-weight: bold; color: #3498db; margin-top: 10px;")
+        layout.addWidget(lbl_eff)
+
+        grid = QGridLayout()
+        
+        lbl_det = QLabel("✅ Eventos Cazados:")
+        lbl_det_val = QLabel(f"{detected}/{total_events}")
+        lbl_det_val.setStyleSheet("color: #2ecc71; font-size: 24px; font-weight: bold;")
+        grid.addWidget(lbl_det, 0, 0)
+        grid.addWidget(lbl_det_val, 0, 1)
+
+        lbl_miss = QLabel("❌ Eventos Perdidos:")
+        lbl_miss_val = QLabel(f"{missed}")
+        lbl_miss_val.setStyleSheet("color: #e74c3c; font-size: 24px; font-weight: bold;")
+        grid.addWidget(lbl_miss, 1, 0)
+        grid.addWidget(lbl_miss_val, 1, 1)
+        
+        layout.addLayout(grid)
+        
+        # --- SECCIÓN 2: CALIDAD (PRECISION) ---
+        line = QLabel()
+        line.setStyleSheet("border-top: 1px solid #555; margin: 10px 0;")
+        layout.addWidget(line)
+        
+        lbl_qual = QLabel("2. FIABILIDAD (¿Inventa cosas?)")
+        lbl_qual.setStyleSheet("font-size: 16px; font-weight: bold; color: #f1c40f; margin-top: 5px;")
+        layout.addWidget(lbl_qual)
+        
+        grid2 = QGridLayout()
+        
+        # Porcentaje de Precisión
+        lbl_prec = QLabel("🎯 Precisión de Detección:")
+        lbl_prec_val = QLabel(f"{precision_pct:.1f}%")
+        
+        # Color dinámico para la nota
+        color_prec = "#2ecc71" if precision_pct > 80 else "#f39c12" if precision_pct > 50 else "#e74c3c"
+        lbl_prec_val.setStyleSheet(f"color: {color_prec}; font-size: 32px; font-weight: bold;")
+        
+        grid2.addWidget(lbl_prec, 0, 0)
+        grid2.addWidget(lbl_prec_val, 0, 1)
+        
+        # Tiempo de Ruido
+        lbl_noise = QLabel("🔊 Tiempo de 'Ruido' (Falso Positivo):")
+        lbl_noise_val = QLabel(f"{noise_seconds:.1f} seg")
+        lbl_noise_val.setStyleSheet("color: #e74c3c; font-size: 18px; font-weight: bold;")
+        
+        grid2.addWidget(lbl_noise, 1, 0)
+        grid2.addWidget(lbl_noise_val, 1, 1)
+        
+        layout.addLayout(grid2)
+
+        # Explicación
+        lbl_note = QLabel("Nota: 'Precisión' indica qué porcentaje de lo que detecta la IA corresponde realmente a un evento del CSV.\nSi es baja, la IA está detectando grifos fantasma.")
+        lbl_note.setStyleSheet("color: gray; font-size: 11px; margin-top: 15px;")
+        lbl_note.setWordWrap(True)
+        layout.addWidget(lbl_note)
+
+        btn_close = QPushButton("Cerrar")
+        btn_close.clicked.connect(self.accept)
+        layout.addWidget(btn_close)
+
+
 
 # --- APLICACIÓN PRINCIPAL ---
 class BeerAnalysisApp(QMainWindow):
@@ -325,7 +374,9 @@ class BeerAnalysisApp(QMainWindow):
         self.video_queue = []
         self.video_root_folder = ""
         self.is_batch_running = False
-        self.json_data_per_video = {}
+        
+        self.all_csv_events = [] 
+        self.current_video_events = []
 
         self.init_ui()
 
@@ -342,9 +393,10 @@ class BeerAnalysisApp(QMainWindow):
         self.btn_vid.clicked.connect(self.load_video)
         self.btn_mod = QPushButton("3. 🧠 Cargar Modelo")
         self.btn_mod.clicked.connect(self.load_model)
-        self.btn_json = QPushButton("4. 📄 Cargar JSON")
-        self.btn_json.clicked.connect(self.load_json)
-        for b in [self.btn_folder, self.btn_vid, self.btn_mod, self.btn_json]: files_layout.addWidget(b)
+        self.btn_csv = QPushButton("4. 📄 Cargar CSV (Truth)")
+        self.btn_csv.clicked.connect(self.load_csv)
+        
+        for b in [self.btn_folder, self.btn_vid, self.btn_mod, self.btn_csv]: files_layout.addWidget(b)
         layout.addLayout(files_layout)
 
         # Fila Ejecución
@@ -354,7 +406,7 @@ class BeerAnalysisApp(QMainWindow):
         self.btn_run = QPushButton("▶ EJECUTAR VIDEO ÚNICO")
         self.btn_run.setStyleSheet("background-color: #2e7d32; font-weight: bold;")
         self.btn_run.clicked.connect(self.start_analysis)
-        self.btn_run_batch = QPushButton("⏩ EJECUTAR LOTE")
+        self.btn_run_batch = QPushButton("⏩ EJECUTAR LOTE (CSV)")
         self.btn_run_batch.setStyleSheet("background-color: #d35400; font-weight: bold;")
         self.btn_run_batch.setEnabled(False) 
         self.btn_run_batch.clicked.connect(self.start_batch_processing)
@@ -372,19 +424,24 @@ class BeerAnalysisApp(QMainWindow):
         self.btn_metrics = QPushButton("📈 Ver Métricas (Kappa)")
         self.btn_metrics.setStyleSheet("background-color: #8e44ad; font-weight: bold;")
         self.btn_metrics.clicked.connect(self.show_metrics)
-        
-        # --- AQUÍ ESTABA EL ERROR: AHORA DEFINIMOS EL BOTÓN ANTES DE AÑADIRLO ---
+
         self.btn_log = QPushButton("📋 Log Eventos")
         self.btn_log.setStyleSheet("background-color: #7f8c8d; font-weight: bold;")
         self.btn_log.clicked.connect(self.show_event_log)
         
+        # --- NUEVO BOTÓN MANUAL DE RESUMEN ---
+        self.btn_summary = QPushButton("🏆 Ver Resumen")
+        self.btn_summary.setStyleSheet("background-color: #f1c40f; color: black; font-weight: bold;")
+        self.btn_summary.clicked.connect(self.show_summary)
+        
         results_layout.addWidget(self.btn_results)
         results_layout.addWidget(self.btn_metrics)
-        results_layout.addWidget(self.btn_log) # Ahora ya existe
+        results_layout.addWidget(self.btn_log)
+        results_layout.addWidget(self.btn_summary)
         layout.addLayout(results_layout)
 
         # Monitor
-        self.video_display = QLabel("Seleccione Carpeta, Modelo y JSON")
+        self.video_display = QLabel("Seleccione Carpeta, Modelo y CSV")
         self.video_display.setStyleSheet("background: black; border: 1px solid #444;")
         self.video_display.setAlignment(Qt.AlignCenter)
         self.video_display.setMinimumHeight(500)
@@ -408,6 +465,121 @@ class BeerAnalysisApp(QMainWindow):
         self.bar_truth = DetectionBar("#f1c40f", "TRUTH")
         layout.addWidget(self.bar_truth)
 
+    # --- HELPERS DE FECHA Y MATCHING ---
+    def extract_datetime_from_filename(self, filename):
+        try:
+            name = os.path.splitext(filename)[0]
+            parts = name.split('_')
+            if not parts: return None
+            for p in reversed(parts):
+                if len(p) == 14 and p.isdigit():
+                    return datetime.strptime(p, "%Y%m%d%H%M%S")
+        except: pass
+        return None
+
+    def extract_date_from_text(self, text):
+        if not text: return None
+        try:
+            match14 = re.search(r'(\d{14})', text)
+            if match14: return datetime.strptime(match14.group(1), "%Y%m%d%H%M%S")
+            match8 = re.search(r'(\d{8})', text)
+            if match8: return datetime.strptime(match8.group(1), "%Y%m%d")
+        except: pass
+        return None
+
+    def find_best_match(self, json_name, ai_names):
+        """Busca la clase de IA que mejor encaja con el nombre del JSON"""
+        if json_name in ai_names: return json_name, "Exacto"
+        json_lower = json_name.lower()
+        for name in ai_names:
+            if name.lower() == json_lower: return name, "Case-Insensitive"
+        candidates = []
+        for name in ai_names:
+            if json_name in name or name in json_name: candidates.append(name)
+        if candidates:
+            candidates.sort(key=lambda x: abs(len(x) - len(json_name)))
+            return candidates[0], "Aproximado"
+        return None, "Ninguno"
+
+    def load_csv(self):
+        path, _ = QFileDialog.getOpenFileName(self, "CSV Truth", "", "CSV (*.csv)")
+        if path:
+            try:
+                self.all_csv_events = [] 
+                count_entries = 0
+                with open(path, 'r', encoding='utf-8-sig') as f:
+                    sample = f.read(2048)
+                    f.seek(0)
+                    delimiter = ';' if ';' in sample else ','
+                    reader = csv.DictReader(f, delimiter=delimiter)
+                    for row in reader:
+                        tap_id = row.get("Grifo") or row.get("grifo") or "Unknown"
+                        url_video = row.get("URL Video", "")
+                        
+                        dt_from_url = self.extract_date_from_text(url_video)
+                        if not dt_from_url:
+                            v_path = row.get("Video Path", "")
+                            if v_path: dt_from_url = self.extract_datetime_from_filename(os.path.basename(v_path))
+                        if not dt_from_url: dt_from_url = datetime.now() 
+
+                        start_str = row.get("Hora Inicio", "00:00:00")
+                        end_str = row.get("Hora Fin", "00:00:00")
+                        
+                        try:
+                            t_start = datetime.strptime(start_str.strip(), "%H:%M:%S").time()
+                            t_end = datetime.strptime(end_str.strip(), "%H:%M:%S").time()
+                            base_date = dt_from_url.date() if isinstance(dt_from_url, datetime) else dt_from_url
+                            start_dt = datetime.combine(base_date, t_start)
+                            end_dt = datetime.combine(base_date, t_end)
+                            
+                            if end_dt < start_dt: end_dt += timedelta(days=1)
+                        except: continue
+
+                        self.all_csv_events.append({
+                            "tap_id": tap_id,
+                            "start_dt": start_dt,
+                            "end_dt": end_dt
+                        })
+                        count_entries += 1
+
+                self.btn_csv.setText(f"📄 CSV Universal ({count_entries})")
+                if self.video_path: self.load_truth_for_current_video(os.path.basename(self.video_path))
+                self.check_batch_ready()
+            except Exception as e:
+                print(f"❌ Error CSV: {e}")
+
+    def load_truth_for_current_video(self, filename):
+        video_start_dt = self.extract_datetime_from_filename(filename)
+        if not video_start_dt: return
+
+        duration_sec = self.total_frames / self.fps if self.fps > 0 else 0
+        video_end_dt = video_start_dt + timedelta(seconds=duration_sec)
+        
+        self.bar_truth.init_buffer(self.total_frames)
+        self.current_video_events = [] 
+        real_fps = self.fps if self.fps > 0 else 15.0
+        
+        for event in self.all_csv_events:
+            ev_start = event["start_dt"]
+            ev_end = event["end_dt"]
+            if ev_start < video_end_dt and ev_end > video_start_dt:
+                rel_start_sec = (ev_start - video_start_dt).total_seconds()
+                rel_end_sec = (ev_end - video_start_dt).total_seconds()
+                f_start = int(rel_start_sec * real_fps)
+                f_end = int(rel_end_sec * real_fps)
+                
+                event_copy = event.copy()
+                event_copy["f_start"] = f_start
+                event_copy["f_end"] = f_end
+                self.current_video_events.append(event_copy)
+
+                draw_start = max(0, f_start)
+                draw_end = min(self.total_frames - 1, f_end)
+                if draw_end > draw_start:
+                    for f in range(draw_start, draw_end + 1):
+                        self.bar_truth.mark_detection(f, True)
+        self.bar_truth.update()
+
     def select_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "Seleccionar Carpeta con Videos")
         if folder:
@@ -430,15 +602,7 @@ class BeerAnalysisApp(QMainWindow):
         self.bar_truth.init_buffer(self.total_frames)
         self.set_video_position(0)
         self.setWindowTitle(f"Validador IA - {os.path.basename(path)}")
-        
-        # Auto-cargar verdad si hay JSON
-        if self.json_data_per_video:
-            fname = os.path.basename(path)
-            # Lógica simple de búsqueda
-            if fname not in self.json_data_per_video:
-                name_no_ext = os.path.splitext(fname)[0]
-                if name_no_ext in self.json_data_per_video: fname = name_no_ext
-            self.load_truth_for_current_video(fname)
+        if self.all_csv_events: self.load_truth_for_current_video(os.path.basename(path))
 
     def load_model(self):
         path, _ = QFileDialog.getOpenFileName(self, "Seleccionar .pt", "", "YOLO Model (*.pt)")
@@ -455,35 +619,8 @@ class BeerAnalysisApp(QMainWindow):
                 self.btn_mod.setText(f"🧠 {os.path.basename(path)}")
             except Exception as e: print(f"Error modelo: {e}")
 
-    def load_json(self):
-        path, _ = QFileDialog.getOpenFileName(self, "JSON Truth", "", "JSON (*.json)")
-        if path:
-            try:
-                with open(path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    self.json_data_per_video = {}
-                    videos_list = data.get("videos", [])
-                    for v in videos_list:
-                        fname = ""
-                        raw_path = v.get("video_path", "")
-                        if raw_path:
-                            fname = os.path.basename(raw_path)
-                            if "\\" in fname: fname = fname.split("\\")[-1]
-                        if not fname: fname = v.get("filename") or v.get("name")
-                        
-                        if fname:
-                            self.json_data_per_video[fname] = v
-                            name_no_ext = os.path.splitext(fname)[0]
-                            if name_no_ext != fname: self.json_data_per_video[name_no_ext] = v
-                    
-                    self.btn_json.setText(f"📄 JSON ({len(videos_list)})")
-                    if self.video_path:
-                        self.load_video_from_path(self.video_path) # Recargar para pintar verdad
-                    self.check_batch_ready()
-            except Exception as e: print(f"Error JSON: {e}")
-
     def check_batch_ready(self):
-        if self.video_root_folder and self.json_data_per_video:
+        if self.video_root_folder and self.all_csv_events:
             self.btn_run_batch.setEnabled(True)
 
     def refresh_bars(self):
@@ -511,12 +648,7 @@ class BeerAnalysisApp(QMainWindow):
 
     def start_batch_processing(self):
         if not self.model_path: return
-        self.video_queue = list(self.json_data_per_video.keys())
-        # Filtrar duplicados (por tener nombre con y sin extension)
-        self.video_queue = list(set([v.get("filename", k) for k,v in self.json_data_per_video.items() if "filename" in v or "video_path" in v]))
-        # Simplificación: Usar las claves directas del dict, filtrando las redundantes si es necesario
-        # Para simplificar, usamos todas las claves que parezcan archivos
-        self.video_queue = [k for k in self.json_data_per_video.keys() if "." in k] # Truco simple
+        self.video_queue = [f for f in os.listdir(self.video_root_folder) if f.lower().endswith(('.mp4', '.avi'))]
         self.is_batch_running = True
         self.process_next_in_queue()
 
@@ -527,26 +659,8 @@ class BeerAnalysisApp(QMainWindow):
             return
         video_filename = self.video_queue.pop(0)
         full_path = os.path.join(self.video_root_folder, video_filename)
-        if not os.path.exists(full_path):
-            print(f"Skip {video_filename}")
-            self.process_next_in_queue()
-            return
         self.load_video_from_path(full_path)
         self.start_analysis(auto_batch=True)
-
-    def load_truth_for_current_video(self, filename):
-        video_data = self.json_data_per_video.get(filename)
-        if not video_data: return
-        self.bar_truth.init_buffer(self.total_frames)
-        v_fps = video_data.get("fps", self.fps)
-        for tap in video_data.get("taps", []):
-            for cycle in tap.get("cycles", []):
-                f_start = int(cycle["start_time_sec"] * v_fps)
-                f_end = int(cycle["end_time_sec"] * v_fps)
-                f_start = max(0, f_start)
-                f_end = min(self.total_frames - 1, f_end)
-                for f in range(f_start, f_end + 1): self.bar_truth.mark_detection(f, True)
-        self.bar_truth.update()
 
     def start_analysis(self, auto_batch=False):
         if self.video_path and self.model_path:
@@ -558,8 +672,18 @@ class BeerAnalysisApp(QMainWindow):
             self.analysis_thread = AnalysisThread(self.video_path, self.model_path, self.ai_config, current_f)
             self.analysis_thread.frame_ready.connect(self.display_analysis_frame)
             self.analysis_thread.detection_event.connect(self.update_live_bars)
-            if auto_batch: self.analysis_thread.finished.connect(self.process_next_in_queue)
+            
+            # CONECTAMOS EL FINAL DEL ANÁLISIS AL RESUMEN
+            if auto_batch:
+                self.analysis_thread.finished.connect(self.process_next_in_queue)
+            else:
+                self.analysis_thread.finished.connect(self.on_analysis_finished) 
+                
             self.analysis_thread.start()
+
+    def on_analysis_finished(self):
+        self.btn_play.setText("▶ Play") 
+        self.show_summary() # Lanzar popup
 
     def update_live_bars(self, idx, detections_dict):
         for class_name, found in detections_dict.items():
@@ -609,7 +733,92 @@ class BeerAnalysisApp(QMainWindow):
         if curr < self.total_frames - 1:
             self.timeline_bar.setValue(curr + 1)
             self.set_video_position(curr + 1)
-        else: self.timer.stop()
+        else:
+            self.timer.stop()
+            self.btn_play.setText("▶ Play")
+
+    def show_summary(self):
+        if not self.current_video_events:
+            QMessageBox.warning(self, "Info", "Sin datos de eventos para este video.")
+            return
+        
+        # --- FILTRO DE "SOLO GRIFOS" ---
+        # Definimos qué palabras debe tener la clase para ser considerada un grifo.
+        # Cualquier clase que NO tenga esto, será invisible para los cálculos.
+        target_keywords = ["grifo", "tap", "handle", "abierto_1"] 
+        
+        valid_ai_bars = []
+        
+        print("\n--- CALCULANDO PRECISIÓN (SOLO GRIFOS) ---")
+        for name, bar in self.detection_bars.items():
+            name_lower = name.lower()
+            
+            # Solo aceptamos si contiene "grifo", "tap" o "handle"
+            is_valid_tap = any(k in name_lower for k in target_keywords)
+            
+            if is_valid_tap:
+                valid_ai_bars.append(bar)
+                print(f"  ✅ Incluida en cálculo: '{name}'")
+            else:
+                # Cervezas, vasos, personas... se ignoran. 
+                # Si detectan cosas fuera de sitio, NO penalizan la precisión.
+                print(f"  ⚪ Ignorada (No afecta métricas): '{name}'")
+
+        if not valid_ai_bars:
+            QMessageBox.warning(self, "Aviso", "No he encontrado ninguna clase que parezca un grifo.\nAsegúrate de que tus clases contengan 'grifo' o 'tap'.")
+
+        # --- PARTE 1: EFICACIA (Recall) ---
+        # ¿Cazamos los eventos del CSV usando solo los grifos?
+        detected_events = 0
+        missed_events = 0
+        
+        truth_mask = [False] * self.total_frames
+        
+        for evt in self.current_video_events:
+            f_start = max(0, evt.get("f_start", 0))
+            f_end = min(self.total_frames - 1, evt.get("f_end", 0))
+            
+            if f_end <= f_start: continue
+
+            # Rellenar Timeline Verdad
+            for i in range(f_start, f_end + 1):
+                truth_mask[i] = True
+
+            # ¿Detectó alguno de los GRIFOS FILTRADOS?
+            any_detection = False
+            for bar in valid_ai_bars:
+                if sum(bar.buffer[f_start:f_end+1]) > 0:
+                    any_detection = True
+                    break
+            
+            if any_detection: detected_events += 1
+            else: missed_events += 1
+
+        # --- PARTE 2: PRECISIÓN (Ruido) ---
+        # Aquí es donde el filtro es clave. Si una "Cerveza" se detecta fuera de tiempo,
+        # como no está en 'valid_ai_bars', ai_activity_mask[i] será False y no contará como error.
+        
+        ai_true_positive_frames = 0
+        ai_false_positive_frames = 0
+        
+        ai_activity_mask = [False] * self.total_frames
+        for bar in valid_ai_bars:
+            for i, val in enumerate(bar.buffer):
+                if val > 0: ai_activity_mask[i] = True
+        
+        for i in range(self.total_frames):
+            if ai_activity_mask[i]: # Si un GRIFO pitó...
+                if truth_mask[i]:
+                    ai_true_positive_frames += 1 # Era verdad (Acierto)
+                else:
+                    ai_false_positive_frames += 1 # Era mentira (Ruido de Grifo)
+        
+        total_ai_frames = ai_true_positive_frames + ai_false_positive_frames
+        precision_pct = (ai_true_positive_frames / total_ai_frames * 100) if total_ai_frames > 0 else 0.0
+        noise_seconds = ai_false_positive_frames / self.fps if self.fps > 0 else 0
+
+        modal = SummaryModal(detected_events, missed_events, len(self.current_video_events), precision_pct, noise_seconds, self)
+        modal.exec()
 
     def show_results(self):
         if self.total_frames > 0:
@@ -624,15 +833,10 @@ class BeerAnalysisApp(QMainWindow):
             modal.exec()
 
     def show_event_log(self):
-        if not self.video_path or not self.json_data_per_video:
-            QMessageBox.warning(self, "Faltan datos", "Carga un video y el JSON primero.")
+        if not self.video_path or not self.all_csv_events:
+            QMessageBox.warning(self, "Faltan datos", "Carga un video y el CSV primero.")
             return
-        current_filename = os.path.basename(self.video_path)
-        if current_filename not in self.json_data_per_video:
-             name_no_ext = os.path.splitext(current_filename)[0]
-             if name_no_ext in self.json_data_per_video: current_filename = name_no_ext
-        
-        modal = EventsLogModal(current_filename, self.json_data_per_video, self.detection_bars, self.fps, self.total_frames, self)
+        modal = EventsLogModal(os.path.basename(self.video_path), self.detection_bars, self.fps, self.total_frames, self.current_video_events, self)
         modal.exec()
 
     def update_time_label(self, pos):
