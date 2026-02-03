@@ -23,12 +23,21 @@ from detector import AnalysisThread
 class SettingsModal(QDialog):
     def __init__(self, current_config, model_classes, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Configuración Avanzada por Clase")
+        self.setWindowTitle("Configuración Avanzada")
         self.setMinimumWidth(600)
         self.setStyleSheet("background-color: #2b2b2b; color: white;")
         layout = QVBoxLayout(self)
         
         form_layout = QFormLayout()
+        
+        # --- NUEVO PARÁMETRO: DURACIÓN EVENTO ---
+        self.duration_spin = QSpinBox()
+        self.duration_spin.setRange(1, 300) # De 1 segundo a 5 minutos
+        self.duration_spin.setSuffix(" seg")
+        self.duration_spin.setValue(current_config.get('csv_duration', 10)) # Valor por defecto 10
+        form_layout.addRow("Duración Fija Evento (CSV):", self.duration_spin)
+        # ----------------------------------------
+
         self.stride_spin = QSpinBox()
         self.stride_spin.setRange(1, 20)
         self.stride_spin.setValue(current_config.get('stride', 1))
@@ -46,8 +55,6 @@ class SettingsModal(QDialog):
         self.table = QTableWidget(len(model_classes), 3) 
         self.table.setHorizontalHeaderLabels(["Clase Original", "Etiqueta (Alias)", "Confianza Mín."])
         self.table.horizontalHeader().setStretchLastSection(True)
-        self.table.setColumnWidth(0, 200)
-        self.table.setColumnWidth(1, 150)
         
         self.class_map = current_config.get('class_map', {})
 
@@ -88,85 +95,13 @@ class SettingsModal(QDialog):
             spinbox = widget.findChild(QDoubleSpinBox)
             conf_val = spinbox.value()
             new_map[original_name] = {'alias': alias, 'conf': conf_val, 'active': True}
-        return {'stride': self.stride_spin.value(), 'iou': self.iou_spin.value(), 'class_map': new_map}
-
-class ConfusionMatrixModal(QDialog):
-    def __init__(self, y_true, y_pred, class_name, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle(f"Matriz de Confusión: {class_name}")
-        self.setMinimumSize(500, 500)
-        self.setStyleSheet("background-color: #1e1e1e; color: white;")
         
-        layout = QVBoxLayout(self)
-        
-        # Calcular métricas usando sklearn
-        cm = confusion_matrix(y_true, y_pred, labels=[1, 0]) # 1: Abierto, 0: Cerrado
-        # Extraer valores (notar que labels=[1,0] cambia el orden estándar a TP, FN, FP, TN)
-        tp, fn, fp, tn = cm.ravel()
-        total = tp + tn + fp + fn
-        
-        # Título
-        title = QLabel(f"Análisis de Frames para: {class_name}")
-        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #f1c40f; margin-bottom: 10px;")
-        layout.addWidget(title)
-
-        # Grid de la Matriz
-        grid = QGridLayout()
-        grid.setSpacing(10)
-
-        # Labels de cabecera
-        grid.addWidget(QLabel(""), 0, 0)
-        grid.addWidget(self._header_label("PREDICCIÓN IA\n(Abierto)"), 0, 1)
-        grid.addWidget(self._header_label("PREDICCIÓN IA\n(Cerrado)"), 0, 2)
-
-        # Fila 1: Realidad Abierto
-        grid.addWidget(self._header_label("REALIDAD\n(CSV Abierto)"), 1, 0)
-        grid.addWidget(self._cell_box(f"TP (Acierto)\n{tp}", f"{(tp/total*100):.1f}%", "#2ecc71"), 1, 1)
-        grid.addWidget(self._cell_box(f"FN (Olvido)\n{fn}", f"{(fn/total*100):.1f}%", "#e74c3c"), 1, 2)
-
-        # Fila 2: Realidad Cerrado
-        grid.addWidget(self._header_label("REALIDAD\n(CSV Cerrado)"), 2, 0)
-        grid.addWidget(self._cell_box(f"FP (Fantasma)\n{fp}", f"{(fp/total*100):.1f}%", "#e67e22"), 2, 1)
-        grid.addWidget(self._cell_box(f"TN (Silencio)\n{tn}", f"{(tn/total*100):.1f}%", "#34495e"), 2, 2)
-
-        layout.addLayout(grid)
-
-        # Métricas resumen al pie
-        metrics_text = (
-            f"<b>Precisión:</b> {(tp/(tp+fp)*100 if (tp+fp)>0 else 0):.2f}% (Fiabilidad)<br>"
-            f"<b>Recall:</b> {(tp/(tp+fn)*100 if (tp+fn)>0 else 0):.2f}% (Eficacia)<br>"
-            f"<b>Total Frames Analizados:</b> {total}"
-        )
-        lbl_metrics = QLabel(metrics_text)
-        lbl_metrics.setStyleSheet("background: #2b2b2b; padding: 15px; border-radius: 5px; margin-top: 10px;")
-        layout.addWidget(lbl_metrics)
-
-        btn_close = QPushButton("Cerrar")
-        btn_close.clicked.connect(self.accept)
-        layout.addWidget(btn_close)
-
-    def _header_label(self, text):
-        lbl = QLabel(text)
-        lbl.setAlignment(Qt.AlignCenter)
-        lbl.setStyleSheet("font-weight: bold; color: #95a5a6; font-size: 11px;")
-        return lbl
-
-    def _cell_box(self, top_text, pct_text, color):
-        widget = QWidget()
-        widget.setStyleSheet(f"background-color: {color}; border-radius: 10px; min-height: 100px;")
-        l = QVBoxLayout(widget)
-        
-        t1 = QLabel(top_text)
-        t1.setAlignment(Qt.AlignCenter)
-        t1.setStyleSheet("color: white; font-weight: bold; font-size: 14px; background: transparent;")
-        
-        t2 = QLabel(pct_text)
-        t2.setAlignment(Qt.AlignCenter)
-        t2.setStyleSheet("color: rgba(255,255,255,0.8); font-size: 18px; font-weight: bold; background: transparent;")
-        
-        l.addWidget(t1)
-        l.addWidget(t2)
-        return widget
+        return {
+            'stride': self.stride_spin.value(),
+            'iou': self.iou_spin.value(),
+            'csv_duration': self.duration_spin.value(), # <--- Guardamos el nuevo valor
+            'class_map': new_map
+        }
     
 # --- 2. MODAL DE RESULTADOS (% ACIERTO) ---
 class ResultsModal(QDialog):
@@ -428,7 +363,166 @@ class SummaryModal(QDialog):
         btn_close.clicked.connect(self.accept)
         layout.addWidget(btn_close)
 
+class VirtualVideoManager:
+    def __init__(self):
+        self.videos = [] # Lista de dicts: {path, start_global, end_global, total_frames, cap}
+        self.total_global_frames = 0
+        self.current_open_index = -1
+        self.cap = None
 
+    def add_video(self, path):
+        # Abrimos momentáneamente para leer longitud
+        temp_cap = cv2.VideoCapture(path)
+        frames = int(temp_cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = temp_cap.get(cv2.CAP_PROP_FPS)
+        temp_cap.release()
+
+        start = self.total_global_frames
+        end = start + frames - 1
+        
+        self.videos.append({
+            'path': path,
+            'start_global': start,
+            'end_global': end,
+            'frames': frames,
+            'fps': fps
+        })
+        self.total_global_frames += frames
+
+    def get_frame(self, global_frame_idx):
+        # 1. Buscar en qué video cae este frame global
+        target_video_idx = -1
+        video_data = None
+        
+        for i, v in enumerate(self.videos):
+            if v['start_global'] <= global_frame_idx <= v['end_global']:
+                target_video_idx = i
+                video_data = v
+                break
+        
+        if target_video_idx == -1: return None, None # Fuera de rango
+
+        # 2. Gestión inteligente de apertura de archivo (para no abrir/cerrar a lo loco)
+        if self.current_open_index != target_video_idx:
+            if self.cap: self.cap.release()
+            self.cap = cv2.VideoCapture(video_data['path'])
+            self.current_open_index = target_video_idx
+            print(f"Cambio de cinta: Reproduciendo {os.path.basename(video_data['path'])}")
+
+        # 3. Calcular frame local y buscar
+        local_frame = global_frame_idx - video_data['start_global']
+        
+        # Optimización: Si pedimos el frame siguiente, no hacemos set (es lento), solo read
+        current_pos = self.cap.get(cv2.CAP_PROP_POS_FRAMES)
+        if current_pos != local_frame:
+            self.cap.set(cv2.CAP_PROP_POS_FRAMES, local_frame)
+            
+        ret, frame = self.cap.read()
+        return ret, frame
+    
+    def get_current_filename(self, global_frame_idx):
+        for v in self.videos:
+            if v['start_global'] <= global_frame_idx <= v['end_global']:
+                return os.path.basename(v['path'])
+        return "Desconocido"
+
+# --- 1. MODAL DE CONFIGURACIÓN (CORREGIDO) ---
+class ConfusionMatrixModal(QDialog):
+    def __init__(self, y_true, y_pred, class_name, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"Matriz de Confusión: {class_name}")
+        self.setMinimumSize(500, 500)
+        self.setStyleSheet("background-color: #1e1e1e; color: white;")
+               
+        layout = QVBoxLayout(self)
+        
+        # Calcular métricas usando sklearn
+        cm = confusion_matrix(y_true, y_pred, labels=[1, 0]) # 1: Abierto, 0: Cerrado
+        tp, fn, fp, tn = cm.ravel()
+        
+        # --- CORRECCIÓN MATEMÁTICA ---
+        # 1. Calculamos los totales POR FILA (Realidad)
+        total_real_abierto = tp + fn
+        total_real_cerrado = fp + tn
+        
+        # 2. Prevenimos división por cero (si el video o CSV está vacío en esa categoría)
+        denom_abierto = total_real_abierto if total_real_abierto > 0 else 1
+        denom_cerrado = total_real_cerrado if total_real_cerrado > 0 else 1
+        
+        # 3. Calculamos porcentajes relativos a la FILA
+        pct_tp = (tp / denom_abierto) * 100
+        pct_fn = (fn / denom_abierto) * 100
+        pct_fp = (fp / denom_cerrado) * 100
+        pct_tn = (tn / denom_cerrado) * 100
+        # -----------------------------
+
+        # Título
+        title = QLabel(f"Análisis de Frames para: {class_name}")
+        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #f1c40f; margin-bottom: 10px;")
+        layout.addWidget(title)
+
+        # Grid de la Matriz
+        grid = QGridLayout()
+        grid.setSpacing(10)
+
+        # Labels de cabecera
+        grid.addWidget(QLabel(""), 0, 0)
+        grid.addWidget(self._header_label("PREDICCIÓN IA\n(Abierto)"), 0, 1)
+        grid.addWidget(self._header_label("PREDICCIÓN IA\n(Cerrado)"), 0, 2)
+
+        # Fila 1: Realidad Abierto (Usamos pct_tp y pct_fn)
+        # Añadí el total de la fila en el texto para mayor claridad
+        grid.addWidget(self._header_label(f"REALIDAD\n(CSV Abierto)\nN={total_real_abierto}"), 1, 0)
+        grid.addWidget(self._cell_box(f"TP (Acierto)\n{tp}", f"{pct_tp:.1f}%", "#2ecc71"), 1, 1)
+        grid.addWidget(self._cell_box(f"FN (Olvido)\n{fn}", f"{pct_fn:.1f}%", "#e74c3c"), 1, 2)
+
+        # Fila 2: Realidad Cerrado (Usamos pct_fp y pct_tn)
+        grid.addWidget(self._header_label(f"REALIDAD\n(CSV Cerrado)\nN={total_real_cerrado}"), 2, 0)
+        grid.addWidget(self._cell_box(f"FP (Fantasma)\n{fp}", f"{pct_fp:.1f}%", "#e67e22"), 2, 1)
+        grid.addWidget(self._cell_box(f"TN (Silencio)\n{tn}", f"{pct_tn:.1f}%", "#34495e"), 2, 2)
+
+        layout.addLayout(grid)
+
+        # Métricas resumen al pie
+        total_global = tp + fn + fp + tn
+        precision = (tp/(tp+fp)*100) if (tp+fp)>0 else 0
+        recall = (tp/(tp+fn)*100) if (tp+fn)>0 else 0
+        
+        metrics_text = (
+            f"<b>Precisión:</b> {precision:.2f}% (Fiabilidad de lo detectado)<br>"
+            f"<b>Recall:</b> {recall:.2f}% (Capacidad de no perder eventos)<br>"
+            f"<b>Total Frames Analizados:</b> {total_global}"
+        )
+        lbl_metrics = QLabel(metrics_text)
+        lbl_metrics.setStyleSheet("background: #2b2b2b; padding: 15px; border-radius: 5px; margin-top: 10px;")
+        layout.addWidget(lbl_metrics)
+
+        btn_close = QPushButton("Cerrar")
+        btn_close.clicked.connect(self.accept)
+        layout.addWidget(btn_close)
+
+    def _header_label(self, text):
+        lbl = QLabel(text)
+        lbl.setAlignment(Qt.AlignCenter)
+        lbl.setStyleSheet("font-weight: bold; color: #95a5a6; font-size: 11px;")
+        return lbl
+
+    def _cell_box(self, top_text, pct_text, color):
+        widget = QWidget()
+        widget.setStyleSheet(f"background-color: {color}; border-radius: 10px; min-height: 100px;")
+        l = QVBoxLayout(widget)
+        
+        t1 = QLabel(top_text)
+        t1.setAlignment(Qt.AlignCenter)
+        t1.setStyleSheet("color: white; font-weight: bold; font-size: 14px; background: transparent;")
+        
+        t2 = QLabel(pct_text)
+        t2.setAlignment(Qt.AlignCenter)
+        t2.setStyleSheet("color: rgba(255,255,255,0.8); font-size: 18px; font-weight: bold; background: transparent;")
+        
+        l.addWidget(t1)
+        l.addWidget(t2)
+        return widget
 
 # --- APLICACIÓN PRINCIPAL ---
 class BeerAnalysisApp(QMainWindow):
@@ -438,6 +532,9 @@ class BeerAnalysisApp(QMainWindow):
         self.resize(1200, 900)
         self.setStyleSheet("QMainWindow { background-color: #121212; } QPushButton { padding: 8px; color: white; background-color: #333; }")
         
+        self.virtual_manager = VirtualVideoManager() # <--- NUEVO
+        self.is_global_mode = False                  # <--- NUEVO
+        
         self.video_path = None
         self.model_path = None
         self.cap = None
@@ -445,6 +542,8 @@ class BeerAnalysisApp(QMainWindow):
         self.fps = 15.0
         self.model_classes = []
         self.detection_bars = {} 
+        self.ai_config = {'conf': 0.40, 'stride': 1, 'csv_duration': 10, 'class_map': {}} 
+        self.last_csv_path = None # <--- Variable nueva para recordar qué CSV recargar
         self.ai_config = {'conf': 0.40, 'stride': 1, 'class_map': {}}
         self.timer = QTimer()
         self.timer.timeout.connect(self.next_frame)
@@ -547,38 +646,50 @@ class BeerAnalysisApp(QMainWindow):
 
     # Pega esto dentro de class BeerAnalysisApp, a la altura de def init_ui o def load_video
     def show_results(self):
+        # Validaciones básicas
         if not self.current_video_events or self.total_frames == 0:
-            QMessageBox.warning(self, "Aviso", "No hay datos suficientes para generar la matriz.")
+            QMessageBox.warning(self, "Aviso", "No hay datos suficientes (CSV o Video vacío).")
+            return
+        
+        # 1. Definir qué clases son 'Grifos' para unificar detecciones
+        target_keywords = ["grifo", "tap", "handle", "abierto_1", "abierto_2", "abierto_3", "abierto_4", "abierto_5"]
+        valid_bars = [bar for name, bar in self.detection_bars.items() 
+                      if any(k in name.lower() for k in target_keywords)]
+        
+        if not valid_bars:
+            QMessageBox.warning(self, "Error", "No se encontraron clases de tipo 'grifo'.")
             return
 
-        # 1. Crear la Verdad (Truth Mask) con Tolerancia de 1.5 seg
+        # 2. Construir Arrays COMPLETOS (Frame a Frame)
+        # A) Array de PREDICCIÓN (IA)
+        # Si CUALQUIERA de los grifos detecta algo en frame i -> pred[i] = 1
+        y_pred_full = [0] * self.total_frames
+        for bar in valid_bars:
+            for i, val in enumerate(bar.buffer):
+                if val > 0: y_pred_full[i] = 1
+
+        # B) Array de REALIDAD (CSV) con Tolerancia (Granularidad)
+        # Aplicamos 1.5s de margen para ser justos con el lag humano
         tolerance_frames = int(1.5 * self.fps) 
-        y_true_extended = [0] * self.total_frames
+        y_true_full = [0] * self.total_frames
         
         for evt in self.current_video_events:
             f_start = max(0, evt["f_start"] - tolerance_frames)
             f_end = min(self.total_frames - 1, evt["f_end"] + tolerance_frames)
+            # Rellenamos de 1s la zona del evento + tolerancia
             for i in range(f_start, f_end + 1):
-                y_true_extended[i] = 1
+                y_true_full[i] = 1
 
-        # 2. Elegir qué clases analizar (Grifos)
-        target_keywords = ["grifo", "tap", "handle", "abierto_1"]
-        valid_bars = [bar for name, bar in self.detection_bars.items() 
-                      if any(k in name.lower() for k in target_keywords)]
+        # 3. APLICAR EL STRIDE (Muestreo)
+        # Esta es la parte CLAVE. Si stride=5, nos quedamos con frames 0, 5, 10...
+        current_stride = self.ai_config.get('stride', 1)
+        
+        # Slicing de listas en Python: lista[inicio:fin:paso]
+        y_true_sampled = y_true_full[::current_stride]
+        y_pred_sampled = y_pred_full[::current_stride]
 
-        if not valid_bars:
-            QMessageBox.warning(self, "Error", "No hay clases de 'grifo' detectadas (revisa nombres de clases).")
-            return
-
-        # 3. Unificamos las detecciones de la IA
-        y_pred = [0] * self.total_frames
-        for bar in valid_bars:
-            for i, val in enumerate(bar.buffer):
-                if val > 0: y_pred[i] = 1
-
-        # 4. Lanzar el Modal de Matriz
-        # Usamos stride=1 para máxima precisión en el análisis final
-        modal = ConfusionMatrixModal(y_true_extended, y_pred, "Grifos (Unificado)", self)
+        # 4. Lanzar Modal
+        modal = ConfusionMatrixModal(y_true_sampled, y_pred_sampled, current_stride, self)
         modal.exec()
 
     # --- HELPERS DE FECHA Y MATCHING ---
@@ -620,49 +731,74 @@ class BeerAnalysisApp(QMainWindow):
     def load_csv(self):
         path, _ = QFileDialog.getOpenFileName(self, "CSV Truth", "", "CSV (*.csv)")
         if path:
-            try:
-                self.all_csv_events = [] 
-                count_entries = 0
-                with open(path, 'r', encoding='utf-8-sig') as f:
-                    sample = f.read(2048)
-                    f.seek(0)
-                    delimiter = ';' if ';' in sample else ','
-                    reader = csv.DictReader(f, delimiter=delimiter)
-                    for row in reader:
-                        tap_id = row.get("Grifo") or row.get("grifo") or "Unknown"
-                        url_video = row.get("URL Video", "")
+            self.load_csv_file(path)
+
+    def load_csv_file(self, path):
+        try:
+            self.last_csv_path = path # Guardamos ruta para recargas futuras
+            self.all_csv_events = [] 
+            count_entries = 0
+            count_skipped = 0 
+            
+            # --- LEEMOS LA DURACIÓN DESDE LA CONFIGURACIÓN (YA NO ES FIJO) ---
+            duration_sec = self.ai_config.get('csv_duration', 10) 
+            # -----------------------------------------------------------------
+
+            with open(path, 'r', encoding='utf-8-sig') as f:
+                sample = f.read(2048)
+                f.seek(0)
+                delimiter = ';' if ';' in sample else ','
+                reader = csv.DictReader(f, delimiter=delimiter)
+                
+                for row in reader:
+                    # 1. FILTRO CERVEZA = 1
+                    is_beer_val = row.get("Cerveza") or row.get("Cervezas") or "0"
+                    if str(is_beer_val).strip() != '1':
+                        count_skipped += 1
+                        continue 
+
+                    tap_id = row.get("Grifo") or row.get("grifo") or "Unknown"
+                    url_video = row.get("URL Video", "")
+                    
+                    dt_from_url = self.extract_date_from_text(url_video)
+                    if not dt_from_url:
+                        v_path = row.get("Video Path", "")
+                        if v_path: dt_from_url = self.extract_datetime_from_filename(os.path.basename(v_path))
+                    if not dt_from_url: dt_from_url = datetime.now() 
+
+                    # 2. CALCULAR TIEMPO CON PARAMETRO DINÁMICO
+                    start_str = row.get("Hora Inicio", "00:00:00")
+                    try:
+                        t_start = datetime.strptime(start_str.strip(), "%H:%M:%S").time()
+                        base_date = dt_from_url.date() if isinstance(dt_from_url, datetime) else dt_from_url
+                        start_dt = datetime.combine(base_date, t_start)
                         
-                        dt_from_url = self.extract_date_from_text(url_video)
-                        if not dt_from_url:
-                            v_path = row.get("Video Path", "")
-                            if v_path: dt_from_url = self.extract_datetime_from_filename(os.path.basename(v_path))
-                        if not dt_from_url: dt_from_url = datetime.now() 
-
-                        start_str = row.get("Hora Inicio", "00:00:00")
-                        end_str = row.get("Hora Fin", "00:00:00")
+                        # Usamos la variable duration_sec
+                        end_dt = start_dt + timedelta(seconds=duration_sec)
                         
-                        try:
-                            t_start = datetime.strptime(start_str.strip(), "%H:%M:%S").time()
-                            t_end = datetime.strptime(end_str.strip(), "%H:%M:%S").time()
-                            base_date = dt_from_url.date() if isinstance(dt_from_url, datetime) else dt_from_url
-                            start_dt = datetime.combine(base_date, t_start)
-                            end_dt = datetime.combine(base_date, t_end)
-                            
-                            if end_dt < start_dt: end_dt += timedelta(days=1)
-                        except: continue
+                    except Exception as e: 
+                        continue
 
-                        self.all_csv_events.append({
-                            "tap_id": tap_id,
-                            "start_dt": start_dt,
-                            "end_dt": end_dt
-                        })
-                        count_entries += 1
+                    self.all_csv_events.append({
+                        "tap_id": tap_id,
+                        "start_dt": start_dt,
+                        "end_dt": end_dt
+                    })
+                    count_entries += 1
 
-                self.btn_csv.setText(f"📄 CSV Universal ({count_entries})")
-                if self.video_path: self.load_truth_for_current_video(os.path.basename(self.video_path))
-                self.check_batch_ready()
-            except Exception as e:
-                print(f"❌ Error CSV: {e}")
+            self.btn_csv.setText(f"📄 CSV ({duration_sec}s) - {count_entries} Cervezas")
+            
+            # Refrescar visualización si hay video cargado
+            if self.is_global_mode:
+                self.load_global_truth()
+            elif self.video_path: 
+                self.load_truth_for_current_video(os.path.basename(self.video_path))
+            
+            self.check_batch_ready()
+
+        except Exception as e:
+            print(f"❌ Error CSV: {e}")
+            QMessageBox.warning(self, "Error CSV", f"No se pudo procesar:\n{e}")
 
     def load_truth_for_current_video(self, filename):
         video_start_dt = self.extract_datetime_from_filename(filename)
@@ -699,9 +835,23 @@ class BeerAnalysisApp(QMainWindow):
     def select_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "Seleccionar Carpeta con Videos")
         if folder:
+            # 1. Guardar la ruta
             self.video_root_folder = folder
-            self.btn_folder.setText(f"📁 .../{os.path.basename(folder)}")
-            self.check_batch_ready()
+            
+            # 2. Contar videos inmediatamente para confirmar al usuario
+            videos_found = [f for f in os.listdir(folder) if f.lower().endswith(('.mp4', '.avi'))]
+            count = len(videos_found)
+            
+            # 3. Actualizar texto del botón
+            self.btn_folder.setText(f"📁 .../{os.path.basename(folder)} ({count} videos)")
+            
+            # 4. Avisar si está vacía
+            if count == 0:
+                QMessageBox.warning(self, "Carpeta Vacía", "No he encontrado videos .mp4 o .avi en esta carpeta.")
+                self.btn_run_batch.setEnabled(False) # Asegurar que no se pueda ejecutar
+            else:
+                # 5. Comprobar si ya podemos activar el botón de Lote
+                self.check_batch_ready()
 
     def load_video(self):
         path, _ = QFileDialog.getOpenFileName(self, "Video", "", "Videos (*.mp4 *.avi)")
@@ -736,8 +886,21 @@ class BeerAnalysisApp(QMainWindow):
             except Exception as e: print(f"Error modelo: {e}")
 
     def check_batch_ready(self):
-        if self.video_root_folder and self.all_csv_events:
+        has_folder = bool(self.video_root_folder)
+        has_csv = bool(self.all_csv_events)
+        
+        if has_folder and has_csv:
             self.btn_run_batch.setEnabled(True)
+            self.btn_run_batch.setText(f"⏩ EJECUTAR LOTE ({len(self.all_csv_events)} eventos)")
+            self.btn_run_batch.setStyleSheet("background-color: #d35400; font-weight: bold; color: white;")
+        else:
+            self.btn_run_batch.setEnabled(False)
+            # Feedback visual de qué falta
+            missing = []
+            if not has_folder: missing.append("Falta Carpeta")
+            if not has_csv: missing.append("Falta CSV")
+            self.btn_run_batch.setText(f"⏩ Esperando... ({', '.join(missing)})")
+            self.btn_run_batch.setStyleSheet("background-color: #555; color: #aaa;")
 
     def refresh_bars(self):
         for i in reversed(range(self.bars_container.count())): 
@@ -761,12 +924,151 @@ class BeerAnalysisApp(QMainWindow):
         if modal.exec():
             self.ai_config = modal.get_config()
             self.refresh_bars()
+            # --- RECARGA AUTOMÁTICA DEL CSV ---
+            # Si cambiamos la duración, recargamos el CSV automáticamente para aplicar cambios
+            if self.last_csv_path:
+                print(f"Recargando CSV con nueva duración: {self.ai_config['csv_duration']}s")
+                self.load_csv_file(self.last_csv_path)
+            # ----------------------------------
+    
+    def run_global_analysis_step(self, video_index):
+        """ Ejecuta el análisis del video N de la lista virtual """
+        if video_index >= len(self.virtual_manager.videos):
+            QMessageBox.information(self, "Fin", "Análisis de Lote Global Completado.")
+            self.show_summary() # Resumen de TODO el lote
+            return
+
+        video_data = self.virtual_manager.videos[video_index]
+        path = video_data['path']
+        global_offset = video_data['start_global']
+        
+        # Configuramos el título para saber progreso
+        self.setWindowTitle(f"Analizando {video_index + 1}/{len(self.virtual_manager.videos)}: {os.path.basename(path)}")
+        
+        # Reutilizamos tu AnalysisThread existente
+        if self.analysis_thread and self.analysis_thread.isRunning():
+            self.analysis_thread.stop()
+            self.analysis_thread.wait()
+            
+        # IMPORTANTE: Pasamos '0' como start_frame local, 
+        # pero necesitamos pasarle el offset global para que sepa dónde pintar
+        self.analysis_thread = AnalysisThread(path, self.model_path, self.ai_config, 0)
+        
+        # Conectamos las señales
+        self.analysis_thread.frame_ready.connect(self.display_analysis_frame)
+        
+        # TRUCO: Interceptamos la señal de detección para sumar el offset
+        self.analysis_thread.detection_event.connect(lambda f, d: self.update_global_bars(f, d, global_offset))
+        
+        # Al terminar este video, lanzamos el siguiente
+        self.analysis_thread.finished.connect(lambda: self.run_global_analysis_step(video_index + 1))
+        
+        self.analysis_thread.start()
+
+    def update_global_bars(self, local_frame, detections_dict, global_offset):
+        # Convertimos frame local a global
+        global_frame = global_offset + local_frame
+        
+        # Pintamos en las barras globales
+        for class_name, found in detections_dict.items():
+            if class_name in self.detection_bars:
+                bar = self.detection_bars[class_name]
+                bar.mark_detection(global_frame, found)
+                bar.set_current_frame(global_frame)
+        
+        self.bar_truth.set_current_frame(global_frame)
+        self.timeline_bar.setValue(global_frame)
+        # Opcional: No actualizar video_position cada frame para ganar velocidad
+        # self.set_video_position(global_frame)
 
     def start_batch_processing(self):
-        if not self.model_path: return
-        self.video_queue = [f for f in os.listdir(self.video_root_folder) if f.lower().endswith(('.mp4', '.avi'))]
-        self.is_batch_running = True
-        self.process_next_in_queue()
+        if not self.model_path or not self.video_root_folder: return
+
+        # 1. Reiniciar Gestor Virtual
+        self.virtual_manager = VirtualVideoManager()
+        self.is_global_mode = True
+        
+        # 2. Escanear todos los videos y añadirlos al timeline virtual
+        video_files = sorted([f for f in os.listdir(self.video_root_folder) if f.lower().endswith(('.mp4', '.avi'))])
+        
+        if not video_files:
+            QMessageBox.warning(self, "Error", "Carpeta vacía")
+            return
+
+        progress_dialog = QMessageBox(self)
+        progress_dialog.setText("Escaneando duración de videos... (Esto no tarda mucho)")
+        progress_dialog.setStandardButtons(QMessageBox.NoButton)
+        progress_dialog.show()
+        QApplication.processEvents()
+
+        for f in video_files:
+            full_path = os.path.join(self.video_root_folder, f)
+            self.virtual_manager.add_video(full_path)
+
+        progress_dialog.close()
+        progress_dialog.deleteLater()  # <--- Asegura que se destruya el objeto
+        QApplication.processEvents()   # <--- ¡IMPORTANTE! Fuerza a la pantalla a actualizarse YA
+
+        # 3. Configurar UI Global
+        self.total_frames = self.virtual_manager.total_global_frames
+        self.timeline_bar.setRange(0, self.total_frames - 1)
+        self.lbl_time.setText(f"LOTE COMPLETO: {len(video_files)} Videos")
+
+        # 4. Inicializar Barras Gigantes
+        for bar in self.detection_bars.values(): 
+            bar.init_buffer(self.total_frames)
+        self.bar_truth.init_buffer(self.total_frames)
+
+        # 5. Cargar Truth Global (Mapear CSV a la línea de tiempo gigante)
+        self.load_global_truth()
+
+        # 6. Iniciar Análisis (Aquí lanzamos el thread iterando sobre lo global)
+        # Nota: Para simplificar, aquí usaremos una recursividad modificada o un thread que sepa cambiar de video.
+        # Por ahora, cargamos el primer frame visualmente:
+        self.set_video_position(0)
+        
+        # Lanzamos el proceso de análisis continuo
+        self.run_global_analysis_step(0)
+
+    def load_global_truth(self):
+        """Mapea los eventos del CSV a la posición global exacta en la cadena de videos"""
+        self.current_video_events = [] # Usaremos esto para el reporte global
+        
+        # Iteramos sobre cada 'segmento' de video virtual
+        for v_data in self.virtual_manager.videos:
+            filename = os.path.basename(v_data['path'])
+            v_start_dt = self.extract_datetime_from_filename(filename)
+            if not v_start_dt: continue
+            
+            # Buscamos eventos que coincidan con ESTE video específico
+            # Lógica similar a load_truth_for_current_video pero ajustando el offset
+            video_end_dt = v_start_dt + timedelta(seconds=v_data['frames']/v_data['fps'])
+            
+            for event in self.all_csv_events:
+                if event["start_dt"] >= v_start_dt and event["end_dt"] <= video_end_dt:
+                    # Calcular frame relativo al video
+                    rel_start_sec = (event["start_dt"] - v_start_dt).total_seconds()
+                    rel_end_sec = (event["end_dt"] - v_start_dt).total_seconds()
+                    
+                    local_f_start = int(rel_start_sec * v_data['fps'])
+                    local_f_end = int(rel_end_sec * v_data['fps'])
+                    
+                    # CONVERTIR A GLOBAL
+                    global_f_start = v_data['start_global'] + local_f_start
+                    global_f_end = v_data['start_global'] + local_f_end
+                    
+                    # Guardar y Pintar
+                    self.current_video_events.append({
+                        **event, 
+                        "f_start": global_f_start, 
+                        "f_end": global_f_end
+                    })
+                    
+                    for f in range(global_f_start, global_f_end + 1):
+                        if f < self.total_frames:
+                            self.bar_truth.mark_detection(f, True)
+        
+        self.bar_truth.update()
 
     def process_next_in_queue(self):
         if not self.video_queue:
@@ -818,19 +1120,33 @@ class BeerAnalysisApp(QMainWindow):
                 self.video_display.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
     def set_video_position(self, pos):
-        if self.cap:
-            self.cap.set(cv2.CAP_PROP_POS_FRAMES, pos)
-            ret, frame = self.cap.read()
+        if self.is_global_mode:
+            # --- MODO LOTE GLOBAL ---
+            ret, img_cv = self.virtual_manager.get_frame(pos)
             if ret:
-                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                rgb = cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB)
                 h, w, ch = rgb.shape
                 img = QImage(rgb.data, w, h, ch*w, QImage.Format_RGB888)
                 self.display_analysis_frame(img)
-                for bar in self.detection_bars.values(): bar.set_current_frame(pos)
-                self.bar_truth.set_current_frame(pos)
-                self.update_time_label(pos)
-        if self.analysis_thread and self.analysis_thread.isRunning():
-            self.analysis_thread.seek(pos)
+                
+                # Actualizar título con el video actual
+                curr_name = self.virtual_manager.get_current_filename(pos)
+                self.setWindowTitle(f"LOTE GLOBAL - Viendo: {curr_name} (Frame Global: {pos})")
+        else:
+            # --- MODO VIDEO ÚNICO (Tu código original) ---
+            if self.cap:
+                self.cap.set(cv2.CAP_PROP_POS_FRAMES, pos)
+                ret, frame = self.cap.read()
+                if ret:
+                    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    h, w, ch = rgb.shape
+                    img = QImage(rgb.data, w, h, ch*w, QImage.Format_RGB888)
+                    self.display_analysis_frame(img)
+
+        # Común para ambos
+        for bar in self.detection_bars.values(): bar.set_current_frame(pos)
+        self.bar_truth.set_current_frame(pos)
+        self.update_time_label(pos)
 
     def toggle_video(self):
         if self.timer.isActive():
@@ -863,7 +1179,7 @@ class BeerAnalysisApp(QMainWindow):
         tolerance_seconds = 1.5 
         tolerance_frames = int(tolerance_seconds * self.fps)
         
-        target_keywords = ["grifo", "tap", "handle", "abierto_1"] 
+        target_keywords = ["grifo", "tap", "handle", "abierto_1", "abierto_2", "abierto_3", "abierto_4", "abierto_5"] 
         valid_ai_bars = [bar for name, bar in self.detection_bars.items() 
                         if any(k in name.lower() for k in target_keywords)]
 
@@ -928,85 +1244,7 @@ class BeerAnalysisApp(QMainWindow):
         modal = SummaryModal(detected_events, missed_events, len(self.current_video_events), 
                             precision_pct, noise_seconds, self)
         modal.exec()
-
-    class ConfusionMatrixModal(QDialog):
-        def __init__(self, y_true, y_pred, class_name, parent=None):
-            super().__init__(parent)
-            self.setWindowTitle(f"Matriz de Confusión: {class_name}")
-            self.setMinimumSize(500, 500)
-            self.setStyleSheet("background-color: #1e1e1e; color: white;")
-            
-            layout = QVBoxLayout(self)
-            
-            # Calcular métricas usando sklearn
-            cm = confusion_matrix(y_true, y_pred, labels=[1, 0]) # 1: Abierto, 0: Cerrado
-            # Extraer valores (notar que labels=[1,0] cambia el orden estándar a TP, FN, FP, TN)
-            tp, fn, fp, tn = cm.ravel()
-            total = tp + tn + fp + fn
-            
-            # Título
-            title = QLabel(f"Análisis de Frames para: {class_name}")
-            title.setStyleSheet("font-size: 18px; font-weight: bold; color: #f1c40f; margin-bottom: 10px;")
-            layout.addWidget(title)
-
-            # Grid de la Matriz
-            grid = QGridLayout()
-            grid.setSpacing(10)
-
-            # Labels de cabecera
-            grid.addWidget(QLabel(""), 0, 0)
-            grid.addWidget(self._header_label("PREDICCIÓN IA\n(Abierto)"), 0, 1)
-            grid.addWidget(self._header_label("PREDICCIÓN IA\n(Cerrado)"), 0, 2)
-
-            # Fila 1: Realidad Abierto
-            grid.addWidget(self._header_label("REALIDAD\n(CSV Abierto)"), 1, 0)
-            grid.addWidget(self._cell_box(f"TP (Acierto)\n{tp}", f"{(tp/total*100):.1f}%", "#2ecc71"), 1, 1)
-            grid.addWidget(self._cell_box(f"FN (Olvido)\n{fn}", f"{(fn/total*100):.1f}%", "#e74c3c"), 1, 2)
-
-            # Fila 2: Realidad Cerrado
-            grid.addWidget(self._header_label("REALIDAD\n(CSV Cerrado)"), 2, 0)
-            grid.addWidget(self._cell_box(f"FP (Fantasma)\n{fp}", f"{(fp/total*100):.1f}%", "#e67e22"), 2, 1)
-            grid.addWidget(self._cell_box(f"TN (Silencio)\n{tn}", f"{(tn/total*100):.1f}%", "#34495e"), 2, 2)
-
-            layout.addLayout(grid)
-
-            # Métricas resumen al pie
-            metrics_text = (
-                f"<b>Precisión:</b> {(tp/(tp+fp)*100 if (tp+fp)>0 else 0):.2f}% (Fiabilidad)<br>"
-                f"<b>Recall:</b> {(tp/(tp+fn)*100 if (tp+fn)>0 else 0):.2f}% (Eficacia)<br>"
-                f"<b>Total Frames Analizados:</b> {total}"
-            )
-            lbl_metrics = QLabel(metrics_text)
-            lbl_metrics.setStyleSheet("background: #2b2b2b; padding: 15px; border-radius: 5px; margin-top: 10px;")
-            layout.addWidget(lbl_metrics)
-
-            btn_close = QPushButton("Cerrar")
-            btn_close.clicked.connect(self.accept)
-            layout.addWidget(btn_close)
-
-        def _header_label(self, text):
-            lbl = QLabel(text)
-            lbl.setAlignment(Qt.AlignCenter)
-            lbl.setStyleSheet("font-weight: bold; color: #95a5a6; font-size: 11px;")
-            return lbl
-
-        def _cell_box(self, top_text, pct_text, color):
-            widget = QWidget()
-            widget.setStyleSheet(f"background-color: {color}; border-radius: 10px; min-height: 100px;")
-            l = QVBoxLayout(widget)
-            
-            t1 = QLabel(top_text)
-            t1.setAlignment(Qt.AlignCenter)
-            t1.setStyleSheet("color: white; font-weight: bold; font-size: 14px; background: transparent;")
-            
-            t2 = QLabel(pct_text)
-            t2.setAlignment(Qt.AlignCenter)
-            t2.setStyleSheet("color: rgba(255,255,255,0.8); font-size: 18px; font-weight: bold; background: transparent;")
-            
-            l.addWidget(t1)
-            l.addWidget(t2)
-            return widget
-
+    
 
     def show_metrics(self):
         if self.total_frames > 0:
