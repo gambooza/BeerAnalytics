@@ -30,13 +30,7 @@ class SettingsModal(QDialog):
         
         form_layout = QFormLayout()
         
-        # --- NUEVO PARÁMETRO: DURACIÓN EVENTO ---
-        self.duration_spin = QSpinBox()
-        self.duration_spin.setRange(1, 300) # De 1 segundo a 5 minutos
-        self.duration_spin.setSuffix(" seg")
-        self.duration_spin.setValue(current_config.get('csv_duration', 10)) # Valor por defecto 10
-        form_layout.addRow("Duración Fija Evento (CSV):", self.duration_spin)
-        # ----------------------------------------
+        # (He eliminado el selector de duración aquí)
 
         self.stride_spin = QSpinBox()
         self.stride_spin.setRange(1, 20)
@@ -99,10 +93,9 @@ class SettingsModal(QDialog):
         return {
             'stride': self.stride_spin.value(),
             'iou': self.iou_spin.value(),
-            'csv_duration': self.duration_spin.value(), # <--- Guardamos el nuevo valor
+            # 'csv_duration': ... (ELIMINADO)
             'class_map': new_map
-        }
-    
+        }    
 # --- 2. MODAL DE RESULTADOS (% ACIERTO) ---
 class ResultsModal(QDialog):
     def __init__(self, truth_bar, detection_bars, total_frames, current_stride, parent=None):
@@ -290,8 +283,7 @@ class EventsLogModal(QDialog):
         f.setBold(True)
         return f
 
-# --- 5. MODAL DE RESUMEN EJECUTIVO ---
-# --- 5. MODAL DE RESUMEN EJECUTIVO (COMPLETO) ---
+# --- 5. MODAL DE RESUMEN EJECUTIVO 
 class SummaryModal(QDialog):
     def __init__(self, detected, missed, total_events, precision_pct, noise_seconds, parent=None):
         super().__init__(parent)
@@ -526,25 +518,25 @@ class ConfusionMatrixModal(QDialog):
 
 # --- APLICACIÓN PRINCIPAL ---
 class BeerAnalysisApp(QMainWindow):
-    def __init__(self):
-        super().__init__()
+    def __init__(self): 
+        super().__init__()  # Inicializamos app 
         self.setWindowTitle("Validador de Bebidas IA - Gamb00za 2026")
         self.resize(1200, 900)
         self.setStyleSheet("QMainWindow { background-color: #121212; } QPushButton { padding: 8px; color: white; background-color: #333; }")
         
-        self.virtual_manager = VirtualVideoManager() # <--- NUEVO
-        self.is_global_mode = False                  # <--- NUEVO
+        self.virtual_manager = VirtualVideoManager() # Funcion que estamos implementando para que se puedan ejecutar múltiples vídeos como uno solo
+        self.is_global_mode = False                  # Indica si estamos en modo vídeo único o global (múltiples vídeos)
         
-        self.video_path = None
+        self.video_path = None # Igualamos a None para evitar errores antes de darle el verdadero path tanto de modelo como de video
         self.model_path = None
         self.cap = None
         self.total_frames = 0
         self.fps = 15.0
         self.model_classes = []
         self.detection_bars = {} 
-        self.ai_config = {'conf': 0.40, 'stride': 1, 'csv_duration': 10, 'class_map': {}} 
+        self.ai_config = {'conf': 0.40, 'stride': 1, 'class_map': {}}  # Configuración IA por defecto
         self.last_csv_path = None # <--- Variable nueva para recordar qué CSV recargar
-        self.ai_config = {'conf': 0.40, 'stride': 1, 'class_map': {}}
+        self.ai_config = {'conf': 0.40, 'stride': 1, 'class_map': {}} 
         self.timer = QTimer()
         self.timer.timeout.connect(self.next_frame)
         self.analysis_thread = None
@@ -563,7 +555,7 @@ class BeerAnalysisApp(QMainWindow):
         layout = QVBoxLayout(central)
 
         # Fila Archivos
-        files_layout = QHBoxLayout()
+        files_layout = QHBoxLayout() # fila de botones de carga
         self.btn_folder = QPushButton("1. 📁 Carpeta Videos")
         self.btn_folder.clicked.connect(self.select_folder)
         self.btn_vid = QPushButton("2. 📂 Cargar 1 Video")
@@ -608,7 +600,7 @@ class BeerAnalysisApp(QMainWindow):
         self.btn_log.setStyleSheet("background-color: #7f8c8d; font-weight: bold;")
         self.btn_log.clicked.connect(self.show_event_log)
         
-        # --- NUEVO BOTÓN MANUAL DE RESUMEN ---
+        # --- Boton de resumen
         self.btn_summary = QPushButton("🏆 Ver Resumen")
         self.btn_summary.setStyleSheet("background-color: #f1c40f; color: black; font-weight: bold;")
         self.btn_summary.clicked.connect(self.show_summary)
@@ -644,7 +636,7 @@ class BeerAnalysisApp(QMainWindow):
         self.bar_truth = DetectionBar("#f1c40f", "TRUTH")
         layout.addWidget(self.bar_truth)
 
-    # Pega esto dentro de class BeerAnalysisApp, a la altura de def init_ui o def load_video
+    
     def show_results(self):
         # Validaciones básicas
         if not self.current_video_events or self.total_frames == 0:
@@ -652,25 +644,25 @@ class BeerAnalysisApp(QMainWindow):
             return
         
         # 1. Definir qué clases son 'Grifos' para unificar detecciones
-        target_keywords = ["grifo", "tap", "handle", "abierto_1", "abierto_2", "abierto_3", "abierto_4", "abierto_5"]
+        target_keywords = ["grifo", "abierto_1", "abierto_2", "abierto_3", "abierto_4", "abierto_5"] # definimos las keywords que identifican grifos (para parnasillo u otros modelos)
         valid_bars = [bar for name, bar in self.detection_bars.items() 
-                      if any(k in name.lower() for k in target_keywords)]
+                      if any(k in name.lower() for k in target_keywords)] # filtramos solo las clases que coinciden con las keywords
         
         if not valid_bars:
             QMessageBox.warning(self, "Error", "No se encontraron clases de tipo 'grifo'.")
             return
 
-        # 2. Construir Arrays COMPLETOS (Frame a Frame)
-        # A) Array de PREDICCIÓN (IA)
+        
+        # Array de PREDICCIÓN (IA)
         # Si CUALQUIERA de los grifos detecta algo en frame i -> pred[i] = 1
-        y_pred_full = [0] * self.total_frames
-        for bar in valid_bars:
+        y_pred_full = [0] * self.total_frames # Inicializamos todo a 0
+        for bar in valid_bars:  # Recorremos solo las barras válidas
             for i, val in enumerate(bar.buffer):
-                if val > 0: y_pred_full[i] = 1
+                if val > 0: y_pred_full[i] = 1 # Marcamos como 1 si cualquiera detecta
 
-        # B) Array de REALIDAD (CSV) con Tolerancia (Granularidad)
-        # Aplicamos 1.5s de margen para ser justos con el lag humano
-        tolerance_frames = int(1.5 * self.fps) 
+        # B) Array de REALIDAD (CSV)
+        # Aplicamos 2.5s de margen para ser justos con el lag del visor GRANULARIDAD
+        tolerance_frames = int(2.5 * self.fps) 
         y_true_full = [0] * self.total_frames
         
         for evt in self.current_video_events:
@@ -714,19 +706,7 @@ class BeerAnalysisApp(QMainWindow):
         except: pass
         return None
 
-    def find_best_match(self, json_name, ai_names):
-        """Busca la clase de IA que mejor encaja con el nombre del JSON"""
-        if json_name in ai_names: return json_name, "Exacto"
-        json_lower = json_name.lower()
-        for name in ai_names:
-            if name.lower() == json_lower: return name, "Case-Insensitive"
-        candidates = []
-        for name in ai_names:
-            if json_name in name or name in json_name: candidates.append(name)
-        if candidates:
-            candidates.sort(key=lambda x: abs(len(x) - len(json_name)))
-            return candidates[0], "Aproximado"
-        return None, "Ninguno"
+    
 
     def load_csv(self):
         path, _ = QFileDialog.getOpenFileName(self, "CSV Truth", "", "CSV (*.csv)")
@@ -735,25 +715,36 @@ class BeerAnalysisApp(QMainWindow):
 
     def load_csv_file(self, path):
         try:
-            self.last_csv_path = path # Guardamos ruta para recargas futuras
+            self.last_csv_path = path 
             self.all_csv_events = [] 
             count_entries = 0
             count_skipped = 0 
             
-            # --- LEEMOS LA DURACIÓN DESDE LA CONFIGURACIÓN (YA NO ES FIJO) ---
-            duration_sec = self.ai_config.get('csv_duration', 10) 
-            # -----------------------------------------------------------------
-
             with open(path, 'r', encoding='utf-8-sig') as f:
                 sample = f.read(2048)
                 f.seek(0)
                 delimiter = ';' if ';' in sample else ','
                 reader = csv.DictReader(f, delimiter=delimiter)
                 
+                # --- 1. DETECCIÓN INTELIGENTE DE COLUMNA CERVEZA ---
+                headers = reader.fieldnames if reader.fieldnames else []
+                beer_col = None
+                for h in headers:
+                    h_clean = h.lower().strip()
+                    if "cerveza" in h_clean or "beer" in h_clean:
+                        beer_col = h
+                        break
+                
+                if not beer_col:
+                    QMessageBox.warning(self, "Atención", 
+                        f"No he encontrado la columna 'Cerveza'.\nColumnas: {headers}")
+                    return
+
                 for row in reader:
-                    # 1. FILTRO CERVEZA = 1
-                    is_beer_val = row.get("Cerveza") or row.get("Cervezas") or "0"
-                    if str(is_beer_val).strip() != '1':
+                    # --- 2. FILTRO FLEXIBLE ---
+                    raw_val = row.get(beer_col, "0")
+                    val_str = str(raw_val).strip().lower()
+                    if val_str not in ['1', 'true', 'si', 'yes', 's', 'y']:
                         count_skipped += 1
                         continue 
 
@@ -766,15 +757,22 @@ class BeerAnalysisApp(QMainWindow):
                         if v_path: dt_from_url = self.extract_datetime_from_filename(os.path.basename(v_path))
                     if not dt_from_url: dt_from_url = datetime.now() 
 
-                    # 2. CALCULAR TIEMPO CON PARAMETRO DINÁMICO
+                    # --- 3. VOLVEMOS A LEER HORA INICIO Y HORA FIN ---
                     start_str = row.get("Hora Inicio", "00:00:00")
+                    end_str = row.get("Hora Fin", "00:00:00") # <--- Recuperado
+                    
                     try:
                         t_start = datetime.strptime(start_str.strip(), "%H:%M:%S").time()
-                        base_date = dt_from_url.date() if isinstance(dt_from_url, datetime) else dt_from_url
-                        start_dt = datetime.combine(base_date, t_start)
+                        t_end = datetime.strptime(end_str.strip(), "%H:%M:%S").time() # <--- Recuperado
                         
-                        # Usamos la variable duration_sec
-                        end_dt = start_dt + timedelta(seconds=duration_sec)
+                        base_date = dt_from_url.date() if isinstance(dt_from_url, datetime) else dt_from_url
+                        
+                        start_dt = datetime.combine(base_date, t_start)
+                        end_dt = datetime.combine(base_date, t_end)
+                        
+                        # Si la hora fin es menor que la inicio, asumimos que ha pasado la medianoche (día siguiente)
+                        if end_dt < start_dt: 
+                            end_dt += timedelta(days=1)
                         
                     except Exception as e: 
                         continue
@@ -786,9 +784,8 @@ class BeerAnalysisApp(QMainWindow):
                     })
                     count_entries += 1
 
-            self.btn_csv.setText(f"📄 CSV ({duration_sec}s) - {count_entries} Cervezas")
+            self.btn_csv.setText(f"📄 CSV (Real) - {count_entries} Cervezas")
             
-            # Refrescar visualización si hay video cargado
             if self.is_global_mode:
                 self.load_global_truth()
             elif self.video_path: 
@@ -799,6 +796,8 @@ class BeerAnalysisApp(QMainWindow):
         except Exception as e:
             print(f"❌ Error CSV: {e}")
             QMessageBox.warning(self, "Error CSV", f"No se pudo procesar:\n{e}")
+
+
 
     def load_truth_for_current_video(self, filename):
         video_start_dt = self.extract_datetime_from_filename(filename)
@@ -924,12 +923,8 @@ class BeerAnalysisApp(QMainWindow):
         if modal.exec():
             self.ai_config = modal.get_config()
             self.refresh_bars()
-            # --- RECARGA AUTOMÁTICA DEL CSV ---
-            # Si cambiamos la duración, recargamos el CSV automáticamente para aplicar cambios
-            if self.last_csv_path:
-                print(f"Recargando CSV con nueva duración: {self.ai_config['csv_duration']}s")
-                self.load_csv_file(self.last_csv_path)
-            # ----------------------------------
+            # Ya no necesitamos recargar el CSV al cambiar ajustes
+            # porque la duración ahora viene fija en el archivo, no en la config.
     
     def run_global_analysis_step(self, video_index):
         """ Ejecuta el análisis del video N de la lista virtual """
