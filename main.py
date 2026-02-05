@@ -19,6 +19,16 @@ from sklearn.metrics import confusion_matrix, cohen_kappa_score
 from gui_components import DetectionBar
 from detector import AnalysisThread
 
+def extract_tap_number(tap_id): #extraemos el numero que viene en el grifo para luego ejecutar la inferencia en base a las detecciones del propio surtidor y no en base a todas 
+    
+    import re
+    if not tap_id:
+        return None
+    match = re.search(r'(\d+)', str(tap_id))
+    if match:
+        return int(match.group(1))
+    return None
+
 # --- 1. MODAL DE CONFIGURACIÓN ---
 class SettingsModal(QDialog):
     def __init__(self, current_config, model_classes, parent=None):
@@ -148,9 +158,9 @@ class ResultsModal(QDialog):
         btn_close.clicked.connect(self.accept)
         layout.addWidget(btn_close)
 
-# --- 3. MODAL DE MÉTRICAS (KAPPA) ---
+# --- 3. MODAL DE MÉTRICAS (KAPPA) --- #COMENTAR  
 class MetricsModal(QDialog):
-    def __init__(self, truth_bar, detection_bars, total_frames, stride, parent=None):
+    def __init__(self, truth_bar, detection_bars, total_frames, stride, events_list, parent=None):
         super().__init__(parent)
         self.setWindowTitle(f"Informe Técnico (Stride: {stride})")
         self.setMinimumSize(800, 400)
@@ -163,32 +173,36 @@ class MetricsModal(QDialog):
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         layout.addWidget(self.table)
 
-        y_true_raw = truth_bar.buffer[:total_frames]
-        y_true = y_true_raw[::stride] 
-
-        print(f"DEBUG: Total frames en buffer truth: {len(y_true_raw)}")
-        print(f"DEBUG: Frames con truth=1 (todos): {sum(y_true_raw)}")
-        print(f"DEBUG: Frames con truth=1 (muestreados): {sum(y_true)}")
-        print(f"DEBUG: Tamaño y_true después de stride: {len(y_true)}")
-
-       
-
-        
+        # Obtener FPS del parent para calcular frames
+        fps = parent.fps if parent and hasattr(parent, 'fps') else 15.0
 
         row = 0
         for name, bar in detection_bars.items():
-            if len(bar.buffer) < total_frames: continue
+            if len(bar.buffer) < total_frames: 
+                continue
+            
+            # Extraer número de la clase (abierto_1 -> 1, abierto_2 -> 2, etc.)
+            class_tap_number = extract_tap_number(name)
+            
+            # Construir y_true SOLO para este grifo
+            y_true_raw = [0] * total_frames
+            for evt in events_list:
+                evt_tap_number = evt.get("tap_number")
+                # Solo marcar si el grifo coincide
+                if evt_tap_number == class_tap_number:
+                    f_start = max(0, evt.get("f_start", 0))
+                    f_end = min(total_frames - 1, evt.get("f_end", 0))
+                    for f in range(f_start, f_end + 1):
+                        if f < total_frames:
+                            y_true_raw[f] = 1
+            
+            # Aplicar stride
+            y_true = y_true_raw[::stride]
             y_pred = bar.buffer[:total_frames][::stride]
 
-            if name == "abierto_1":
-                matches = sum(1 for t, p in zip(y_true, y_pred) if t == 1 and p == 1)
-                truth_ones = sum(y_true)
-                pred_ones = sum(y_pred)
-                print(f"DEBUG DETALLADO:")
-                print(f"  - Frames donde truth=1: {truth_ones}")
-                print(f"  - Frames donde pred=1:  {pred_ones}")
-                print(f"  - Frames donde AMBOS=1 (TP): {matches}")
-                print(f"  - Recall calculado: {matches}/{truth_ones} = {matches/truth_ones if truth_ones > 0 else 0:.2%}")
+            # DEBUG (puedes quitar después)
+            if "abierto" in name.lower():
+                print(f"DEBUG [{name}]: tap_number={class_tap_number}, truth_frames={sum(y_true)}, pred_frames={sum(y_pred)}")
 
             try:
                 cm = confusion_matrix(y_true, y_pred, labels=[0, 1])
@@ -196,7 +210,7 @@ class MetricsModal(QDialog):
             except:
                 tn, fp, fn, tp = 0, 0, 0, 0
 
-            kappa = cohen_kappa_score(y_true, y_pred)
+            kappa = cohen_kappa_score(y_true, y_pred) if len(set(y_true)) > 1 else 0.0
             recall = (tp / (tp + fn)) if (tp + fn) > 0 else 0.0
             precision = (tp / (tp + fp)) if (tp + fp) > 0 else 0.0
 
@@ -215,7 +229,7 @@ class MetricsModal(QDialog):
             self.table.setItem(row, 6, QTableWidgetItem(str(fn)))
             row += 1
 
-        layout.addWidget(QLabel(f"Nota: Métricas calculadas con Stride {stride}."))
+        layout.addWidget(QLabel(f"Nota: Métricas calculadas con Stride {stride}. Cada clase se compara con su grifo."))
         btn_close = QPushButton("Cerrar")
         btn_close.clicked.connect(self.accept)
         layout.addWidget(btn_close)
@@ -798,6 +812,7 @@ class BeerAnalysisApp(QMainWindow):
 
                     self.all_csv_events.append({
                         "tap_id": tap_id,
+                        "tap_number": extract_tap_number(tap_id),
                         "start_dt": start_dt,
                         "end_dt": end_dt
                     })
@@ -1263,7 +1278,7 @@ class BeerAnalysisApp(QMainWindow):
     def show_metrics(self):
         if self.total_frames > 0:
             stride = self.ai_config.get('stride', 1)
-            modal = MetricsModal(self.bar_truth, self.detection_bars, self.total_frames, stride, self)
+            modal = MetricsModal(self.bar_truth, self.detection_bars, self.total_frames, stride, self.current_video_events, self)
             modal.exec()
 
     def show_event_log(self):
