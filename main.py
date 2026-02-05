@@ -166,10 +166,29 @@ class MetricsModal(QDialog):
         y_true_raw = truth_bar.buffer[:total_frames]
         y_true = y_true_raw[::stride] 
 
+        print(f"DEBUG: Total frames en buffer truth: {len(y_true_raw)}")
+        print(f"DEBUG: Frames con truth=1 (todos): {sum(y_true_raw)}")
+        print(f"DEBUG: Frames con truth=1 (muestreados): {sum(y_true)}")
+        print(f"DEBUG: Tamaño y_true después de stride: {len(y_true)}")
+
+       
+
+        
+
         row = 0
         for name, bar in detection_bars.items():
             if len(bar.buffer) < total_frames: continue
             y_pred = bar.buffer[:total_frames][::stride]
+
+            if name == "abierto_1":
+                matches = sum(1 for t, p in zip(y_true, y_pred) if t == 1 and p == 1)
+                truth_ones = sum(y_true)
+                pred_ones = sum(y_pred)
+                print(f"DEBUG DETALLADO:")
+                print(f"  - Frames donde truth=1: {truth_ones}")
+                print(f"  - Frames donde pred=1:  {pred_ones}")
+                print(f"  - Frames donde AMBOS=1 (TP): {matches}")
+                print(f"  - Recall calculado: {matches}/{truth_ones} = {matches/truth_ones if truth_ones > 0 else 0:.2%}")
 
             try:
                 cm = confusion_matrix(y_true, y_pred, labels=[0, 1])
@@ -1171,7 +1190,7 @@ class BeerAnalysisApp(QMainWindow):
         
         # --- 1. CONFIGURACIÓN DE GRANULARIDAD ---
         # Tolerancia: 1.5 segundos a cada lado es un estándar razonable
-        tolerance_seconds = 1.5 
+        tolerance_seconds = 30 
         tolerance_frames = int(tolerance_seconds * self.fps)
         
         target_keywords = ["grifo", "tap", "handle", "abierto_1", "abierto_2", "abierto_3", "abierto_4", "abierto_5"] 
