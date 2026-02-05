@@ -229,7 +229,7 @@ class MetricsModal(QDialog):
             self.table.setItem(row, 6, QTableWidgetItem(str(fn)))
             row += 1
 
-        layout.addWidget(QLabel(f"Nota: Métricas calculadas con Stride {stride}. Cada clase se compara con su grifo."))
+        layout.addWidget(QLabel(f"Nota: Métricas calculadas con Stride {stride}. Cada clase se compara con su grifo. en este porcentaje, puesto que es utilizado para calculo exacto de performance de los modelos no se añade granularidad ni tolerancia"))
         btn_close = QPushButton("Cerrar")
         btn_close.clicked.connect(self.accept)
         layout.addWidget(btn_close)
@@ -503,8 +503,8 @@ class ConfusionMatrixModal(QDialog):
 
         # Fila 2: Realidad Cerrado (Usamos pct_fp y pct_tn)
         grid.addWidget(self._header_label(f"REALIDAD\n(CSV Cerrado)\nN={total_real_cerrado}"), 2, 0)
-        grid.addWidget(self._cell_box(f"FP (Fantasma)\n{fp}", f"{pct_fp:.1f}%", "#e67e22"), 2, 1)
-        grid.addWidget(self._cell_box(f"TN (Silencio)\n{tn}", f"{pct_tn:.1f}%", "#34495e"), 2, 2)
+        grid.addWidget(self._cell_box(f"FP (Falsa Alarma)\n{fp}", f"{pct_fp:.1f}%", "#e67e22"), 2, 1)
+        grid.addWidget(self._cell_box(f"TN (Correcto)\n{tn}", f"{pct_tn:.1f}%", "#34495e"), 2, 2)
 
         layout.addLayout(grid)
 
@@ -517,6 +517,7 @@ class ConfusionMatrixModal(QDialog):
             f"<b>Precisión:</b> {precision:.2f}% (Fiabilidad de lo detectado)<br>"
             f"<b>Recall:</b> {recall:.2f}% (Capacidad de no perder eventos)<br>"
             f"<b>Total Frames Analizados:</b> {total_global}"
+            f"<br><i>Nota: Porcentajes calculados respecto a la realidad de cada clase (fila), no al total global. con una tolerancia de 2.5 (medimos precision estricta a nivel de tolerancia)</i>"
         )
         lbl_metrics = QLabel(metrics_text)
         lbl_metrics.setStyleSheet("background: #2b2b2b; padding: 15px; border-radius: 5px; margin-top: 10px;")
@@ -671,6 +672,19 @@ class BeerAnalysisApp(QMainWindow):
 
     
     def show_results(self):
+
+        
+        #   MATRIZ DE CONFUSIÓN GLOBAL
+        #   ==========================
+        #   Mide el rendimiento del sistema COMPLETO (todos los grifos combinados).
+            
+        #    Pregunta que responde: "¿La IA detectó actividad de cerveza cuando 
+        #    realmente la había, sin importar en qué grifo específico?"
+            
+        #    - NO distingue entre grifos individuales
+        #   - Útil para evaluar el sistema en conjunto
+        #   - Para métricas por grifo específico, usar "Informe Técnico (Kappa)"
+        
         # Validaciones básicas
         if not self.current_video_events or self.total_frames == 0:
             QMessageBox.warning(self, "Aviso", "No hay datos suficientes (CSV o Video vacío).")
@@ -1204,8 +1218,8 @@ class BeerAnalysisApp(QMainWindow):
             return
         
         # --- 1. CONFIGURACIÓN DE GRANULARIDAD ---
-        # Tolerancia: 1.5 segundos a cada lado es un estándar razonable
-        tolerance_seconds = 30 
+        # Tolerancia: 2.5 segundos a cada lado es un estándar razonable
+        tolerance_seconds = 2.5
         tolerance_frames = int(tolerance_seconds * self.fps)
         
         target_keywords = ["grifo", "tap", "handle", "abierto_1", "abierto_2", "abierto_3", "abierto_4", "abierto_5"] 
