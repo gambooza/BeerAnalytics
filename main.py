@@ -4,6 +4,7 @@ import csv
 import json
 import re
 from datetime import datetime, timedelta
+from tkinter import font
 import cv2
 from PySide6.QtWidgets import (QApplication, QMainWindow, QPushButton, QVBoxLayout, 
                              QHBoxLayout, QWidget, QFileDialog, QLabel, QSlider,
@@ -160,7 +161,7 @@ class ResultsModal(QDialog):
 
 # --- 3. MODAL DE MÉTRICAS (KAPPA) --- #COMENTAR  
 class MetricsModal(QDialog):
-    def __init__(self, truth_bar, detection_bars, total_frames, stride, events_list, parent=None):
+    def __init__(self, truth_bar, detection_bars, total_frames, stride, events_list, target_keywords, parent=None):
         super().__init__(parent)
         self.setWindowTitle(f"Informe Técnico (Stride: {stride})")
         self.setMinimumSize(800, 400)
@@ -175,6 +176,12 @@ class MetricsModal(QDialog):
 
         # Obtener FPS del parent para calcular frames
         fps = parent.fps if parent and hasattr(parent, 'fps') else 15.0
+
+        self.target_keywords = target_keywords # Aseguramos que el modal tenga acceso a las keywords para filtrar clases y eventos
+
+        precision_values = []
+        recall_values = []
+        kappa_values = []
 
         row = 0
         for name, bar in detection_bars.items():
@@ -214,6 +221,13 @@ class MetricsModal(QDialog):
             recall = (tp / (tp + fn)) if (tp + fn) > 0 else 0.0
             precision = (tp / (tp + fp)) if (tp + fp) > 0 else 0.0
 
+            # Guardamos todos los valores de precisión y recall QUE HAYAN TENIDO EVENTOS para calcular el resumen
+            if sum(y_true) > 0 and any(k in name.lower() for k in self.target_keywords):
+                precision_values.append(precision)
+                recall_values.append(recall)
+                kappa_values.append(kappa)
+
+
             self.table.insertRow(row)
             self.table.setItem(row, 0, QTableWidgetItem(name))
             
@@ -228,6 +242,25 @@ class MetricsModal(QDialog):
             self.table.setItem(row, 5, QTableWidgetItem(str(fp)))
             self.table.setItem(row, 6, QTableWidgetItem(str(fn)))
             row += 1
+
+        # ------- CALCULO DE MEDIA ARITMETICA DE KAPPA , PRECISION Y RECALL -------
+        avg_precision = sum(precision_values) / len(precision_values) if precision_values else 0.0  # calculamos el promedio de kappah, precision y recall para mostrarlo 
+        avg_recall = sum(recall_values) / len(recall_values) if recall_values else 0.0              # en el resumen ejecutivo, si no hay valores 
+        avg_kappa = sum(kappa_values) / len(kappa_values) if kappa_values else 0.0                  # (porque no se detectó ningún evento) se muestra 0.0
+
+        self.table.insertRow(row)
+        font = self.font()
+        font.setBold(True)
+
+        item_name = QTableWidgetItem("PROMEDIO GRIFOS")
+        item_name.setFont(font)
+        self.table.setItem(row, 0, item_name)
+        self.table.setItem(row, 1, QTableWidgetItem(f"{avg_kappa:.3f}"))
+        self.table.setItem(row, 2, QTableWidgetItem(f"{avg_recall:.1%}"))
+        self.table.setItem(row, 3, QTableWidgetItem(f"{avg_precision:.1%}"))
+        self.table.setItem(row, 4, QTableWidgetItem("—"))
+        self.table.setItem(row, 5, QTableWidgetItem("—"))
+        self.table.setItem(row, 6, QTableWidgetItem("—"))
 
         layout.addWidget(QLabel(f"Nota: Métricas calculadas con Stride {stride}. Cada clase se compara con su grifo. en este porcentaje, puesto que es utilizado para calculo exacto de performance de los modelos no se añade granularidad ni tolerancia"))
         btn_close = QPushButton("Cerrar")
@@ -577,9 +610,10 @@ class BeerAnalysisApp(QMainWindow):
         self.video_queue = []
         self.video_root_folder = ""
         self.is_batch_running = False
-        
+
         self.all_csv_events = [] 
         self.current_video_events = []
+        self.target_keywords = ["grifo","tap","handle","abierto_1", "abierto_2", "abierto_3", "abierto_4", "abierto_5"] # Palabras clave para identificar eventos de grifos en el CSV
 
         self.init_ui()
 
@@ -691,7 +725,7 @@ class BeerAnalysisApp(QMainWindow):
             return
         
         # 1. Definir qué clases son 'Grifos' para unificar detecciones
-        target_keywords = ["grifo", "abierto_1", "abierto_2", "abierto_3", "abierto_4", "abierto_5"] # definimos las keywords que identifican grifos (para parnasillo u otros modelos)
+        target_keywords = self.target_keywords # Inicializamos las keywords 
         valid_bars = [bar for name, bar in self.detection_bars.items() 
                       if any(k in name.lower() for k in target_keywords)] # filtramos solo las clases que coinciden con las keywords
         
@@ -1222,7 +1256,7 @@ class BeerAnalysisApp(QMainWindow):
         tolerance_seconds = 2.5
         tolerance_frames = int(tolerance_seconds * self.fps)
         
-        target_keywords = ["grifo", "tap", "handle", "abierto_1", "abierto_2", "abierto_3", "abierto_4", "abierto_5"] 
+        target_keywords = self.target_keywords
         valid_ai_bars = [bar for name, bar in self.detection_bars.items() 
                         if any(k in name.lower() for k in target_keywords)]
 
@@ -1292,7 +1326,7 @@ class BeerAnalysisApp(QMainWindow):
     def show_metrics(self):
         if self.total_frames > 0:
             stride = self.ai_config.get('stride', 1)
-            modal = MetricsModal(self.bar_truth, self.detection_bars, self.total_frames, stride, self.current_video_events, self)
+            modal = MetricsModal(self.bar_truth, self.detection_bars, self.total_frames, stride, self.current_video_events,self.target_keywords, self)
             modal.exec()
 
     def show_event_log(self):
